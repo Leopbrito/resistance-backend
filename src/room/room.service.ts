@@ -26,6 +26,7 @@ export class RoomService {
       socketId: hostSocketId,
       name: hostName,
       isLeader: false,
+      isHost: true,
       roomCode: code,
     };
 
@@ -34,6 +35,7 @@ export class RoomService {
       hostSocketId,
       gameState: {
         phase: GamePhase.WAITING,
+        me: null,
         players: [hostPlayer],
         resistanceWins: 0,
         spyWins: 0,
@@ -75,6 +77,7 @@ export class RoomService {
       socketId,
       name: playerName,
       isLeader: false,
+      isHost: false,
       roomCode: code,
     };
 

@@ -14,6 +14,7 @@ import { GameService } from '../game/game.service';
 import { PlayerService } from '../player/player.service';
 import { CreateRoomDto, JoinRoomDto, SelectTeamDto, VoteTeamDto, MissionVoteDto } from '../shared/dtos';
 import { Room } from '../shared/interfaces';
+import { Role } from 'src/shared/enums';
 
 @WebSocketGateway({ 
   cors: { origin: '*' },
@@ -45,7 +46,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
         this.roomService.removePlayer(client.id);
         
         // Notify others
-        this.emitGameStateAsync(roomCode, room);
+        this.emitGameStateAsync(room);
 
       } catch (e) {
         // Room may have been deleted if it was empty
@@ -67,7 +68,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     client.join(room.code);
     
     this.logger.log(`Room created: ${room.code} by ${client.id}`);
-    this.emitGameStateAsync(room.code, room);
+    this.emitGameStateAsync(room);
     return room.code; // Return early to client
   }
 
@@ -84,7 +85,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       client.join(room.code);
       
       this.logger.log(`Player ${client.id} joined room ${room.code}`);
-      this.emitGameStateAsync(room.code, room);
+      this.emitGameStateAsync(room);
       return { success: true };
     } catch (e) {
       // Return error to the specific client
@@ -103,9 +104,11 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     try {
       const room = this.gameService.startGame(roomCode, client.id);
       this.logger.log(`Game started in room ${room.code}`);
-      this.emitGameStateAsync(room.code, room);
+      this.emitGameStateAsync(room);
+      return { success: true };
     } catch (e) {
       client.emit('error', e.message);
+      return { success: false, error: e.message };
     }
   }
 
@@ -120,7 +123,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
     try {
       const room = this.gameService.selectTeam(roomCode, client.id, dto.selectedPlayers);
-      this.emitGameStateAsync(roomCode, room);
+      this.emitGameStateAsync(room);
     } catch (e) {
       client.emit('error', e.message);
     }
@@ -137,7 +140,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
     try {
       const room = this.gameService.voteTeam(roomCode, client.id, dto.vote);
-      this.emitGameStateAsync(roomCode, room);
+      this.emitGameStateAsync(room);
     } catch (e) {
       client.emit('error', e.message);
     }
@@ -154,50 +157,31 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
     try {
       const room = this.gameService.submitMissionVote(roomCode, client.id, dto.vote);
-      this.emitGameStateAsync(roomCode, room);
+      this.emitGameStateAsync(room);
     } catch (e) {
       client.emit('error', e.message);
     }
   }
 
-  /**
-   * Função para emitir o estado do jogo e proteger papéis sensíveis
-   */
-  private emitGameStateAsync(roomCode: string, room: Room) {
-    // Para simplificar: enviamos o estado global mas OMITIMOS quem é espião.
-    // Você não deve mostrar quem é espião para a resistência.
-    const sanitizedGameState = { ...room.gameState };
-    
-    // Omit spy identification globally
-    if (sanitizedGameState.players) {
-      sanitizedGameState.players = sanitizedGameState.players.map(p => ({
-        ...p,
-        role: undefined, // Hide global roles by default
-      }));
-    }
 
-    // Emit para todos os jogadores o estado 'sanitizado'
-    this.server.to(roomCode).emit('gameStateUpdate', sanitizedGameState);
-
-    // E então manda um evento 'privateRoleUpdate' (ou similar) só mandando os espiões pra quem for espião...
-    // Opcionalmente, pode-se simplesmente percorrer cada socket.
-    const serverInst = this.server;
-    room.gameState.players.forEach(p => {
+  private emitGameStateAsync(room: Room) {
+    room.gameState.players.forEach(player => {
       const privateState = { ...room.gameState };
       
-      // Se for Espião, ele pode ver a lista de espiões (gameState.spyPlayers tem socketIds)
-      if (p.role === 'SPY') {
-        privateState.spyPlayers = room.gameState.spyPlayers;
-      } else {
-        privateState.spyPlayers = []; // Resistência não vê nada
-      }
+      if (player.role === Role.RESISTANCE) {
+        if (privateState.players) {
+          privateState.players = privateState.players.map(p => ({
+            ...p,
+            role: undefined,
+          }));
+        }
+      } 
       
-      // O jogador sempre deve saber seu próprio papel.
-      const personalPlayerObj = room.gameState.players.find(rp => rp.socketId === p.socketId);
-
-      serverInst.to(p.socketId).emit('privateGameState', {
+      this.server.to(player.socketId).emit('gameStateUpdate', {
         ...privateState,
-        myRole: p.role,
+        me: {
+          ...player
+        }
       });
     });
   }

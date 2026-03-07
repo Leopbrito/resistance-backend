@@ -5,6 +5,7 @@ export interface Player {
   name: string;
   role?: Role;
   isLeader: boolean;
+  isHost: boolean;
   roomCode: string;
 }
 
@@ -21,13 +22,13 @@ export interface Round {
 
 export interface GameState {
   phase: GamePhase;
+  me: Player | null;
   players: Player[];
   resistanceWins: number;
   spyWins: number;
   rounds: Round[];
   currentRoundIndex: number; // 0 to 4
   failedTeamsInRow: number; // Se chegar a 5, espiões vencem (regra opcional, mas boa para se ter)
-  spyPlayers?: string[]; // Para enviar apenas aos espiões
 }
 
 export interface Room {

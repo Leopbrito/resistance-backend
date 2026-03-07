@@ -43,9 +43,6 @@ export class GameService {
     this.assignRoles(players);
     this.startNewRound(room.gameState);
     
-    // Armazena quem são os espiões para retornar facilmente pro Client dps
-    room.gameState.spyPlayers = players.filter(p => p.role === Role.SPY).map(p => p.socketId);
-
     return room;
   }
 
