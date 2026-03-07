@@ -36,9 +36,18 @@ export class GameService {
       throw new BadRequestException('The Resistance requer 5 a 10 jogadores');
     }
 
-    if (room.gameState.phase !== GamePhase.WAITING) {
+    if (room.gameState.phase === GamePhase.TEAM_SELECTION || room.gameState.phase === GamePhase.VOTING || room.gameState.phase === GamePhase.MISSION) {
       throw new BadRequestException('Partida já foi iniciada');
     }
+
+    room.gameState.phase = GamePhase.WAITING;
+    room.gameState.resistanceWins = 0;
+    room.gameState.spyWins = 0;
+    room.gameState.rounds = [];
+    room.gameState.currentRoundIndex = 0;
+    room.gameState.failedTeamsInRow = 0;
+    room.gameState.revealRolesStep = false;
+    room.gameState.revealMissionResultStep = false;
 
     this.assignRoles(players);
     this.startNewRound(room.gameState);
@@ -117,6 +126,32 @@ export class GameService {
       throw new BadRequestException('Apenas o líder pode escolher a equipe');
     }
 
+    selectedPlayers.forEach(selectedId => {
+      if (!gameState.players.find(p => p.socketId === selectedId)) {
+        throw new BadRequestException('Jogador selecionado inválido');
+      }
+    });
+
+    currentRound.selectedTeam = selectedPlayers;
+    gameState.revealMissionResultStep = false;
+
+    return room;
+  }
+
+  submitSelectedMissionTeam(roomCode: string, socketId: string, selectedPlayers: string[]): Room {
+    const room = this.roomService.getRoom(roomCode);
+    const { gameState } = room;
+
+    if (gameState.phase !== GamePhase.TEAM_SELECTION) {
+      throw new BadRequestException('Jogo não está na fase de seleção de time');
+    }
+
+    const currentRound = gameState.rounds[gameState.currentRoundIndex];
+
+    if (currentRound.leaderSocketId !== socketId) {
+      throw new BadRequestException('Apenas o líder pode escolher a equipe');
+    }
+
     if (selectedPlayers.length !== currentRound.teamSize) {
       throw new BadRequestException(`Necessário selecionar exatamente ${currentRound.teamSize} jogadores`);
     }
@@ -130,6 +165,7 @@ export class GameService {
 
     currentRound.selectedTeam = selectedPlayers;
     gameState.phase = GamePhase.VOTING;
+    gameState.revealMissionResultStep = false;
 
     return room;
   }
@@ -263,9 +299,11 @@ export class GameService {
     if (failedVotes > 0) {
       currentRound.status = 'MISSION_FAILED';
       gameState.spyWins++;
+      gameState.revealMissionResultStep = true;
     } else {
       currentRound.status = 'MISSION_SUCCESS';
       gameState.resistanceWins++;
+      gameState.revealMissionResultStep = true;
     }
 
     this.checkWinCondition(gameState);

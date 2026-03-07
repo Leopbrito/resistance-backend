@@ -42,6 +42,8 @@ export class RoomService {
         rounds: [],
         currentRoundIndex: 0,
         failedTeamsInRow: 0,
+        revealRolesStep: false,
+        revealMissionResultStep: false,
       }
     };
 

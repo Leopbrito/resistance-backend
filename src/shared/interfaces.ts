@@ -29,6 +29,8 @@ export interface GameState {
   rounds: Round[];
   currentRoundIndex: number; // 0 to 4
   failedTeamsInRow: number; // Se chegar a 5, espiões vencem (regra opcional, mas boa para se ter)
+  revealRolesStep: boolean;
+  revealMissionResultStep: boolean;
 }
 
 export interface Room {

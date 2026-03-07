@@ -14,7 +14,7 @@ import { GameService } from '../game/game.service';
 import { PlayerService } from '../player/player.service';
 import { CreateRoomDto, JoinRoomDto, SelectTeamDto, VoteTeamDto, MissionVoteDto } from '../shared/dtos';
 import { Room } from '../shared/interfaces';
-import { Role } from 'src/shared/enums';
+import { MissionVoteAction, Role } from 'src/shared/enums';
 
 @WebSocketGateway({ 
   cors: { origin: '*' },
@@ -104,7 +104,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     try {
       const room = this.gameService.startGame(roomCode, client.id);
       this.logger.log(`Game started in room ${room.code}`);
-      this.emitGameStateAsync(room);
+      this.emitGameStateAsync(room, true);
       return { success: true };
     } catch (e) {
       client.emit('error', e.message);
@@ -123,6 +123,23 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
     try {
       const room = this.gameService.selectTeam(roomCode, client.id, dto.selectedPlayers);
+      this.emitGameStateAsync(room);
+    } catch (e) {
+      client.emit('error', e.message);
+    }
+  }
+
+  @UsePipes(new ValidationPipe())
+  @SubscribeMessage('submitSelectedMissionTeam')
+  handleSubmitSelectedMissionTeam(
+    @MessageBody() dto: SelectTeamDto,
+    @ConnectedSocket() client: Socket,
+  ) {
+    const roomCode = this.playerService.getRoomCode(client.id);
+    if (!roomCode) return;
+
+    try {
+      const room = this.gameService.submitSelectedMissionTeam(roomCode, client.id, dto.selectedPlayers);
       this.emitGameStateAsync(room);
     } catch (e) {
       client.emit('error', e.message);
@@ -164,7 +181,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   }
 
 
-  private emitGameStateAsync(room: Room) {
+  private emitGameStateAsync(room: Room, revealRolesStep: boolean = false) {
     room.gameState.players.forEach(player => {
       const privateState = { ...room.gameState };
       
@@ -176,12 +193,30 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
           }));
         }
       } 
+
+      if (privateState.rounds.length > 0) {
+        privateState.rounds = privateState.rounds.map(round => {
+          const secretMissionVotes = {
+            ...round.missionVotes,
+          }
+
+          Object.keys(secretMissionVotes).forEach(socketId => {
+              secretMissionVotes[socketId] = "secret" as MissionVoteAction;
+          });
+
+          return {
+            ...round,
+            missionVotes: secretMissionVotes,
+          }
+        });
+      }
       
       this.server.to(player.socketId).emit('gameStateUpdate', {
         ...privateState,
         me: {
           ...player
-        }
+        },
+        revealRolesStep,
       });
     });
   }
