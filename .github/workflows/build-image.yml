@@ -1,0 +1,38 @@
+name: Build Image
+
+on:
+  push:
+    branches:
+      - "release/**"
+    paths-ignore:
+      - ".github/**"
+
+jobs:
+  build-image:
+    name: Build Image
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract version from package.json
+        id: version
+        run: |
+          VERSION=$(jq -r .version package.json)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Login on GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ secrets.GHCR_USERNAME }}
+          password: ${{ secrets.GHCR_TOKEN }}
+
+      - name: Build and push image
+        run: |
+          IMAGE="ghcr.io/${{ secrets.GHCR_USERNAME }}/resistance-backend:${{ steps.version.outputs.version }}"
+          docker build -t $IMAGE .
+          docker push $IMAGE
