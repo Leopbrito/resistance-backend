@@ -70,6 +70,10 @@ export class RoomService {
       throw new BadRequestException('Player already in room');
     }
 
+    if (room.gameState.players.some(p => p.name.toLowerCase() === playerName.toLowerCase())) {
+      throw new BadRequestException('A player with this name is already in the room');
+    }
+
     // Usually The Resistance limit is 10 players
     if (room.gameState.players.length >= 10) {
       throw new BadRequestException('Room is full (max 10 players)');
