@@ -17,7 +17,12 @@ export class GameService {
 
   // Quantidade de espiões por N jogadores
   private readonly spyConfigs: Record<number, number> = {
-    5: 2, 6: 2, 7: 3, 8: 3, 9: 3, 10: 4
+    5: 2,
+    6: 2,
+    7: 3,
+    8: 3,
+    9: 3,
+    10: 4,
   };
 
   constructor(private readonly roomService: RoomService) {}
@@ -36,7 +41,11 @@ export class GameService {
       throw new BadRequestException('The Resistance requer 5 a 10 jogadores');
     }
 
-    if (room.gameState.phase === GamePhase.TEAM_SELECTION || room.gameState.phase === GamePhase.VOTING || room.gameState.phase === GamePhase.MISSION) {
+    if (
+      room.gameState.phase === GamePhase.TEAM_SELECTION ||
+      room.gameState.phase === GamePhase.VOTING ||
+      room.gameState.phase === GamePhase.MISSION
+    ) {
       throw new BadRequestException('Partida já foi iniciada');
     }
 
@@ -51,15 +60,15 @@ export class GameService {
 
     this.assignRoles(players);
     this.startNewRound(room.gameState);
-    
+
     return room;
   }
 
   private assignRoles(players: Player[]) {
     const spyCount = this.spyConfigs[players.length];
-    
+
     // Reseta todos para Resistance e remove líder
-    players.forEach(p => {
+    players.forEach((p) => {
       p.role = Role.RESISTANCE;
       p.isLeader = false;
     });
@@ -77,11 +86,11 @@ export class GameService {
 
   private startNewRound(gameState: GameState) {
     const totalPlayersCount = gameState.players.length;
-    
+
     // Choose new leader by rotating
-    const currentLeaderIndex = gameState.players.findIndex(p => p.isLeader);
+    const currentLeaderIndex = gameState.players.findIndex((p) => p.isLeader);
     let nextLeaderIndex = 0;
-    
+
     if (currentLeaderIndex !== -1) {
       gameState.players[currentLeaderIndex].isLeader = false;
       nextLeaderIndex = (currentLeaderIndex + 1) % totalPlayersCount;
@@ -89,7 +98,7 @@ export class GameService {
       // First round: random leader
       nextLeaderIndex = Math.floor(Math.random() * totalPlayersCount);
     }
-    
+
     const newLeader = gameState.players[nextLeaderIndex];
     newLeader.isLeader = true;
 
@@ -104,7 +113,7 @@ export class GameService {
       selectedTeam: [],
       teamVotes: {},
       missionVotes: {},
-      status: 'PENDING'
+      status: 'PENDING',
     };
 
     gameState.rounds.push(newRound);
@@ -126,8 +135,8 @@ export class GameService {
       throw new BadRequestException('Apenas o líder pode escolher a equipe');
     }
 
-    selectedPlayers.forEach(selectedId => {
-      if (!gameState.players.find(p => p.socketId === selectedId)) {
+    selectedPlayers.forEach((selectedId) => {
+      if (!gameState.players.find((p) => p.socketId === selectedId)) {
         throw new BadRequestException('Jogador selecionado inválido');
       }
     });
@@ -157,8 +166,8 @@ export class GameService {
     }
 
     // Valida se os escolhidos existem na sala
-    selectedPlayers.forEach(selectedId => {
-      if (!gameState.players.find(p => p.socketId === selectedId)) {
+    selectedPlayers.forEach((selectedId) => {
+      if (!gameState.players.find((p) => p.socketId === selectedId)) {
         throw new BadRequestException('Jogador selecionado inválido');
       }
     });
@@ -179,7 +188,7 @@ export class GameService {
     }
 
     const currentRound = gameState.rounds[gameState.currentRoundIndex];
-    
+
     if (currentRound.teamVotes[socketId]) {
       throw new BadRequestException('Você já enviou seu voto');
     }
@@ -197,11 +206,11 @@ export class GameService {
 
   private resolveTeamVotes(gameState: GameState) {
     const currentRound = gameState.rounds[gameState.currentRoundIndex];
-    
+
     let approves = 0;
     let rejects = 0;
 
-    Object.values(currentRound.teamVotes).forEach(v => {
+    Object.values(currentRound.teamVotes).forEach((v) => {
       if (v === TeamVoteAction.APPROVE) approves++;
       else rejects++;
     });
@@ -218,7 +227,7 @@ export class GameService {
 
       if (gameState.failedTeamsInRow === 5) {
         // Espiões vencem se 5 times seguidos forem rejeitados na mesma rodada (Regra oficial)
-        gameState.spyWins = 3; 
+        gameState.spyWins = 3;
         gameState.phase = GamePhase.FINISHED;
       } else {
         // Rotaciona o líder e mantém a mesma rodada tentando equipe novamente
@@ -230,10 +239,10 @@ export class GameService {
   private resetCurrentRoundForNewTeam(gameState: GameState) {
     const totalPlayersCount = gameState.players.length;
     const currentRound = gameState.rounds[gameState.currentRoundIndex];
-    
-    const currentLeaderIndex = gameState.players.findIndex(p => p.isLeader);
+
+    const currentLeaderIndex = gameState.players.findIndex((p) => p.isLeader);
     gameState.players[currentLeaderIndex].isLeader = false;
-    
+
     const nextLeaderIndex = (currentLeaderIndex + 1) % totalPlayersCount;
     gameState.players[nextLeaderIndex].isLeader = true;
 
@@ -242,7 +251,7 @@ export class GameService {
     currentRound.selectedTeam = [];
     currentRound.teamVotes = {};
     currentRound.status = 'PENDING';
-    
+
     gameState.phase = GamePhase.TEAM_SELECTION;
   }
 
@@ -265,7 +274,7 @@ export class GameService {
     }
 
     // Regra The Resistance: Resistência DEVE votar SUCESSO. Somente espiões podem escolher.
-    const player = gameState.players.find(p => p.socketId === socketId);
+    const player = gameState.players.find((p) => p.socketId === socketId);
     if (!player) {
       throw new BadRequestException('Jogador não encontrado');
     }
@@ -286,9 +295,9 @@ export class GameService {
 
   private resolveMission(gameState: GameState) {
     const currentRound = gameState.rounds[gameState.currentRoundIndex];
-    
+
     let failedVotes = 0;
-    Object.values(currentRound.missionVotes).forEach(v => {
+    Object.values(currentRound.missionVotes).forEach((v) => {
       if (v === MissionVoteAction.FAIL) failedVotes++;
     });
 

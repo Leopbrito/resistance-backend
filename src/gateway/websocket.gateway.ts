@@ -16,13 +16,12 @@ import { CreateRoomDto, JoinRoomDto, SelectTeamDto, VoteTeamDto, MissionVoteDto 
 import { Room } from '../shared/interfaces';
 import { MissionVoteAction, Role } from 'src/shared/enums';
 
-@WebSocketGateway({ 
+@WebSocketGateway({
   cors: { origin: '*' },
   transports: ['websocket'],
 })
 export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
-  @WebSocketServer()
-  server: Server;
+  @WebSocketServer() server: Server;
 
   private logger: Logger = new Logger('WebsocketGateway');
 
@@ -44,10 +43,9 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       try {
         const room = this.roomService.getRoom(roomCode);
         this.roomService.removePlayer(client.id);
-        
+
         // Notify others
         this.emitGameStateAsync(room);
-
       } catch (e) {
         // Room may have been deleted if it was empty
         this.logger.error(`Error handling disconnect for room ${roomCode}`);
@@ -59,14 +57,11 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   @UsePipes(new ValidationPipe())
   @SubscribeMessage('createRoom')
-  handleCreateRoom(
-    @MessageBody() dto: CreateRoomDto,
-    @ConnectedSocket() client: Socket,
-  ) {
+  handleCreateRoom(@MessageBody() dto: CreateRoomDto, @ConnectedSocket() client: Socket) {
     const room = this.roomService.createRoom(client.id, dto.playerName);
     this.playerService.addPlayer(client.id, room.code);
     client.join(room.code);
-    
+
     this.logger.log(`Room created: ${room.code} by ${client.id}`);
     this.emitGameStateAsync(room);
     return room.code; // Return early to client
@@ -74,16 +69,13 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   @UsePipes(new ValidationPipe())
   @SubscribeMessage('joinRoom')
-  handleJoinRoom(
-    @MessageBody() dto: JoinRoomDto,
-    @ConnectedSocket() client: Socket,
-  ) {
+  handleJoinRoom(@MessageBody() dto: JoinRoomDto, @ConnectedSocket() client: Socket) {
     try {
       const roomCode = dto.roomCode.toUpperCase();
       const room = this.roomService.joinRoom(roomCode, client.id, dto.playerName);
       this.playerService.addPlayer(client.id, room.code);
       client.join(room.code);
-      
+
       this.logger.log(`Player ${client.id} joined room ${room.code}`);
       this.emitGameStateAsync(room);
       return { success: true };
@@ -114,10 +106,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   @UsePipes(new ValidationPipe())
   @SubscribeMessage('selectMissionTeam')
-  handleSelectTeam(
-    @MessageBody() dto: SelectTeamDto,
-    @ConnectedSocket() client: Socket,
-  ) {
+  handleSelectTeam(@MessageBody() dto: SelectTeamDto, @ConnectedSocket() client: Socket) {
     const roomCode = this.playerService.getRoomCode(client.id);
     if (!roomCode) return;
 
@@ -131,10 +120,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   @UsePipes(new ValidationPipe())
   @SubscribeMessage('submitSelectedMissionTeam')
-  handleSubmitSelectedMissionTeam(
-    @MessageBody() dto: SelectTeamDto,
-    @ConnectedSocket() client: Socket,
-  ) {
+  handleSubmitSelectedMissionTeam(@MessageBody() dto: SelectTeamDto, @ConnectedSocket() client: Socket) {
     const roomCode = this.playerService.getRoomCode(client.id);
     if (!roomCode) return;
 
@@ -148,10 +134,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   @UsePipes(new ValidationPipe())
   @SubscribeMessage('voteTeamApproval')
-  handleVoteTeam(
-    @MessageBody() dto: VoteTeamDto,
-    @ConnectedSocket() client: Socket,
-  ) {
+  handleVoteTeam(@MessageBody() dto: VoteTeamDto, @ConnectedSocket() client: Socket) {
     const roomCode = this.playerService.getRoomCode(client.id);
     if (!roomCode) return;
 
@@ -165,10 +148,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   @UsePipes(new ValidationPipe())
   @SubscribeMessage('submitMissionVote')
-  handleSubmitMissionVote(
-    @MessageBody() dto: MissionVoteDto,
-    @ConnectedSocket() client: Socket,
-  ) {
+  handleSubmitMissionVote(@MessageBody() dto: MissionVoteDto, @ConnectedSocket() client: Socket) {
     const roomCode = this.playerService.getRoomCode(client.id);
     if (!roomCode) return;
 
@@ -180,41 +160,40 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
-
   private emitGameStateAsync(room: Room, revealRolesStep: boolean = false) {
-    room.gameState.players.forEach(player => {
+    room.gameState.players.forEach((player) => {
       const privateState = { ...room.gameState };
-      
+
       if (player.role === Role.RESISTANCE) {
         if (privateState.players) {
-          privateState.players = privateState.players.map(p => ({
+          privateState.players = privateState.players.map((p) => ({
             ...p,
             role: undefined,
           }));
         }
-      } 
+      }
 
       if (privateState.rounds.length > 0) {
-        privateState.rounds = privateState.rounds.map(round => {
+        privateState.rounds = privateState.rounds.map((round) => {
           const secretMissionVotes = {
             ...round.missionVotes,
-          }
+          };
 
-          Object.keys(secretMissionVotes).forEach(socketId => {
-              secretMissionVotes[socketId] = "secret" as MissionVoteAction;
+          Object.keys(secretMissionVotes).forEach((socketId) => {
+            secretMissionVotes[socketId] = 'secret' as MissionVoteAction;
           });
 
           return {
             ...round,
             missionVotes: secretMissionVotes,
-          }
+          };
         });
       }
-      
+
       this.server.to(player.socketId).emit('gameStateUpdate', {
         ...privateState,
         me: {
-          ...player
+          ...player,
         },
         revealRolesStep,
       });
