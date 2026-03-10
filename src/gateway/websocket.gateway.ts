@@ -1,27 +1,27 @@
+import { Logger, UsePipes, ValidationPipe } from '@nestjs/common';
 import {
-  WebSocketGateway,
-  WebSocketServer,
-  SubscribeMessage,
-  MessageBody,
   ConnectedSocket,
+  MessageBody,
   OnGatewayConnection,
   OnGatewayDisconnect,
+  SubscribeMessage,
+  WebSocketGateway,
+  WebSocketServer,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { UsePipes, ValidationPipe, Logger } from '@nestjs/common';
-import { RoomService } from '../room/room.service';
+import { MissionVoteAction, Role, SocketEvent } from 'src/shared/enums';
 import { GameService } from '../game/game.service';
 import { PlayerService } from '../player/player.service';
-import { CreateRoomDto, JoinRoomDto, SelectTeamDto, VoteTeamDto, MissionVoteDto } from '../shared/dtos';
-import { Room } from '../shared/interfaces';
-import { MissionVoteAction, Role } from 'src/shared/enums';
+import { RoomService } from '../room/room.service';
+import { CreateRoomDto, JoinRoomDto, MissionVoteDto, SelectTeamDto, VoteTeamDto } from '../shared/dtos';
+import { GameState, Room } from '../shared/interfaces';
 
 @WebSocketGateway({
   cors: { origin: '*' },
   transports: ['websocket'],
 })
 export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
-  @WebSocketServer() server: Server;
+  @WebSocketServer() public server: Server;
 
   private logger: Logger = new Logger('WebsocketGateway');
 
@@ -56,7 +56,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   // --- ROOM EVENTS ---
 
   @UsePipes(new ValidationPipe())
-  @SubscribeMessage('createRoom')
+  @SubscribeMessage(SocketEvent.CREATE_ROOM)
   handleCreateRoom(@MessageBody() dto: CreateRoomDto, @ConnectedSocket() client: Socket) {
     const room = this.roomService.createRoom(client.id, dto.playerName);
     this.playerService.addPlayer(client.id, room.code);
@@ -64,11 +64,11 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
     this.logger.log(`Room created: ${room.code} by ${client.id}`);
     this.emitGameStateAsync(room);
-    return room.code; // Return early to client
+    return room.code;
   }
 
   @UsePipes(new ValidationPipe())
-  @SubscribeMessage('joinRoom')
+  @SubscribeMessage(SocketEvent.JOIN_ROOM)
   handleJoinRoom(@MessageBody() dto: JoinRoomDto, @ConnectedSocket() client: Socket) {
     try {
       const roomCode = dto.roomCode.toUpperCase();
@@ -79,16 +79,15 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       this.logger.log(`Player ${client.id} joined room ${room.code}`);
       this.emitGameStateAsync(room);
       return { success: true };
-    } catch (e) {
-      // Return error to the specific client
-      client.emit('error', e.message);
-      return { success: false, error: e.message };
+    } catch (error) {
+      client.emit(SocketEvent.ERROR, error.message);
+      return { success: false, error: error.message };
     }
   }
 
   // --- GAME EVENTS ---
 
-  @SubscribeMessage('startGame')
+  @SubscribeMessage(SocketEvent.START_GAME)
   handleStartGame(@ConnectedSocket() client: Socket) {
     const roomCode = this.playerService.getRoomCode(client.id);
     if (!roomCode) return;
@@ -96,11 +95,10 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     try {
       const room = this.gameService.startGame(roomCode, client.id);
       this.logger.log(`Game started in room ${room.code}`);
-      this.emitGameStateAsync(room, true);
-      return { success: true };
+      this.emitGameStateAsync(room);
+      this.emitRevealRoles(room);
     } catch (e) {
       client.emit('error', e.message);
-      return { success: false, error: e.message };
     }
   }
 
@@ -153,50 +151,65 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     if (!roomCode) return;
 
     try {
-      const room = this.gameService.submitMissionVote(roomCode, client.id, dto.vote);
+      let resolveResultMission = false;
+      const room = this.gameService.submitMissionVote(roomCode, client.id, dto.vote, () => {
+        resolveResultMission = true;
+      });
       this.emitGameStateAsync(room);
+      if (resolveResultMission) {
+        this.emitRevealMissionResult(roomCode);
+      }
     } catch (e) {
       client.emit('error', e.message);
     }
   }
 
-  private emitGameStateAsync(room: Room, revealRolesStep: boolean = false) {
+  private emitRevealRoles(room: Room) {
+    this.server.to(room.code).emit(SocketEvent.REVEAL_ROLES);
+  }
+
+  private emitRevealMissionResult(roomCode: string) {
+    this.server.to(roomCode).emit(SocketEvent.REVEAL_MISSION_RESULT);
+  }
+
+  private emitGameStateAsync(room: Room) {
     room.gameState.players.forEach((player) => {
-      const privateState = { ...room.gameState };
+      const privateGameState = { ...room.gameState, me: player };
 
-      if (player.role === Role.RESISTANCE) {
-        if (privateState.players) {
-          privateState.players = privateState.players.map((p) => ({
-            ...p,
-            role: undefined,
-          }));
-        }
-      }
+      this.hideSpysforResistancePlayer(privateGameState);
+      this.hideMissionVotes(privateGameState);
 
-      if (privateState.rounds.length > 0) {
-        privateState.rounds = privateState.rounds.map((round) => {
-          const secretMissionVotes = {
-            ...round.missionVotes,
-          };
-
-          Object.keys(secretMissionVotes).forEach((socketId) => {
-            secretMissionVotes[socketId] = 'secret' as MissionVoteAction;
-          });
-
-          return {
-            ...round,
-            missionVotes: secretMissionVotes,
-          };
-        });
-      }
-
-      this.server.to(player.socketId).emit('gameStateUpdate', {
-        ...privateState,
-        me: {
-          ...player,
-        },
-        revealRolesStep,
-      });
+      this.server.to(player.socketId).emit(SocketEvent.GAME_STATE_UPDATE, privateGameState);
     });
+  }
+
+  private hideSpysforResistancePlayer(gameState: GameState) {
+    if (gameState.me?.role === Role.RESISTANCE) {
+      if (gameState.players) {
+        gameState.players = gameState.players.map((p) => ({
+          ...p,
+          role: undefined,
+        }));
+      }
+    }
+  }
+
+  private hideMissionVotes(gameState: GameState) {
+    if (gameState.rounds.length > 0) {
+      gameState.rounds = gameState.rounds.map((round) => {
+        const secretMissionVotes = {
+          ...round.missionVotes,
+        };
+
+        Object.keys(secretMissionVotes).forEach((socketId) => {
+          secretMissionVotes[socketId] = 'secret' as MissionVoteAction;
+        });
+
+        return {
+          ...round,
+          missionVotes: secretMissionVotes,
+        };
+      });
+    }
   }
 }

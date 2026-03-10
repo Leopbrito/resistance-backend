@@ -22,15 +22,13 @@ export class RoomService {
       hostSocketId,
       gameState: {
         phase: GamePhase.WAITING,
-        me: null,
+        me: hostPlayer,
         players: [hostPlayer],
         resistanceWins: 0,
         spyWins: 0,
         rounds: [],
         currentRoundIndex: 0,
         failedTeamsInRow: 0,
-        revealRolesStep: false,
-        revealMissionResultStep: false,
       },
     };
 

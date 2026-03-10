@@ -1,33 +1,14 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
+import { TEAM_SIZE_MISSION_CONFIGS, TEAM_SIZE_SPY_CONFIGS } from 'src/config/game.config';
 import { RoomService } from '../room/room.service';
-import { Role, GamePhase, TeamVoteAction, MissionVoteAction } from '../shared/enums';
-import { Room, GameState, Player, Round } from '../shared/interfaces';
+import { GamePhase, MissionVoteAction, Role, TeamVoteAction } from '../shared/enums';
+import { GameState, Player, Room, Round } from '../shared/interfaces';
 
 @Injectable()
 export class GameService {
-  // Configuração padrão do Resistance: (Tamanho do time por rodada com base em N jogadores)
-  private readonly teamSizeConfigs: Record<number, number[]> = {
-    5: [2, 3, 2, 3, 3],
-    6: [2, 3, 4, 3, 4],
-    7: [2, 3, 3, 4, 4],
-    8: [3, 4, 4, 5, 5],
-    9: [3, 4, 4, 5, 5],
-    10: [3, 4, 4, 5, 5],
-  };
-
-  // Quantidade de espiões por N jogadores
-  private readonly spyConfigs: Record<number, number> = {
-    5: 2,
-    6: 2,
-    7: 3,
-    8: 3,
-    9: 3,
-    10: 4,
-  };
-
   constructor(private readonly roomService: RoomService) {}
 
-  startGame(roomCode: string, socketId: string): Room {
+  public startGame(roomCode: string, socketId: string): Room {
     const room = this.roomService.getRoom(roomCode);
 
     if (room.hostSocketId !== socketId) {
@@ -49,23 +30,24 @@ export class GameService {
       throw new BadRequestException('Partida já foi iniciada');
     }
 
-    room.gameState.phase = GamePhase.WAITING;
-    room.gameState.resistanceWins = 0;
-    room.gameState.spyWins = 0;
-    room.gameState.rounds = [];
-    room.gameState.currentRoundIndex = 0;
-    room.gameState.failedTeamsInRow = 0;
-    room.gameState.revealRolesStep = false;
-    room.gameState.revealMissionResultStep = false;
-
+    this.resetGameState(room.gameState);
     this.assignRoles(players);
     this.startNewRound(room.gameState);
 
     return room;
   }
 
+  private resetGameState(gameState: GameState) {
+    gameState.phase = GamePhase.WAITING;
+    gameState.resistanceWins = 0;
+    gameState.spyWins = 0;
+    gameState.rounds = [];
+    gameState.currentRoundIndex = 0;
+    gameState.failedTeamsInRow = 0;
+  }
+
   private assignRoles(players: Player[]) {
-    const spyCount = this.spyConfigs[players.length];
+    const spyCount = TEAM_SIZE_SPY_CONFIGS[players.length];
 
     // Reseta todos para Resistance e remove líder
     players.forEach((p) => {
@@ -104,7 +86,7 @@ export class GameService {
 
     // Define team size
     const roundNumber = gameState.rounds.length + 1;
-    const requiredTeamSize = this.teamSizeConfigs[totalPlayersCount][roundNumber - 1];
+    const requiredTeamSize = TEAM_SIZE_MISSION_CONFIGS[totalPlayersCount][roundNumber - 1];
 
     const newRound: Round = {
       roundNumber,
@@ -142,7 +124,6 @@ export class GameService {
     });
 
     currentRound.selectedTeam = selectedPlayers;
-    gameState.revealMissionResultStep = false;
 
     return room;
   }
@@ -174,7 +155,6 @@ export class GameService {
 
     currentRound.selectedTeam = selectedPlayers;
     gameState.phase = GamePhase.VOTING;
-    gameState.revealMissionResultStep = false;
 
     return room;
   }
@@ -255,7 +235,7 @@ export class GameService {
     gameState.phase = GamePhase.TEAM_SELECTION;
   }
 
-  submitMissionVote(roomCode: string, socketId: string, vote: MissionVoteAction): Room {
+  submitMissionVote(roomCode: string, socketId: string, vote: MissionVoteAction, resolveMissionResult: () => void): Room {
     const room = this.roomService.getRoom(roomCode);
     const { gameState } = room;
 
@@ -273,21 +253,18 @@ export class GameService {
       throw new BadRequestException('Você já executou sua parte da missão');
     }
 
-    // Regra The Resistance: Resistência DEVE votar SUCESSO. Somente espiões podem escolher.
     const player = gameState.players.find((p) => p.socketId === socketId);
     if (!player) {
       throw new BadRequestException('Jogador não encontrado');
     }
-    if (player.role === Role.RESISTANCE && vote === MissionVoteAction.FAIL) {
-      throw new BadRequestException('A Resistência não pode sabotar uma missão.');
-    }
 
     currentRound.missionVotes[socketId] = vote;
 
-    // Se todos votaram na missão
     const totalMissionVotes = Object.keys(currentRound.missionVotes).length;
+
     if (totalMissionVotes === currentRound.teamSize) {
       this.resolveMission(gameState);
+      resolveMissionResult();
     }
 
     return room;
@@ -308,13 +285,10 @@ export class GameService {
     if (failedVotes > 0) {
       currentRound.status = 'MISSION_FAILED';
       gameState.spyWins++;
-      gameState.revealMissionResultStep = true;
     } else {
       currentRound.status = 'MISSION_SUCCESS';
       gameState.resistanceWins++;
-      gameState.revealMissionResultStep = true;
     }
-
     this.checkWinCondition(gameState);
   }
 
