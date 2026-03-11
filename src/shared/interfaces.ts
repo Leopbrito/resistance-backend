@@ -1,21 +1,23 @@
 import { Role, GamePhase, TeamVoteAction, MissionVoteAction } from './enums';
 
 export interface Player {
+  id: string;
   socketId: string;
   name: string;
-  role?: Role;
-  isLeader: boolean;
   isHost: boolean;
-  roomCode: string;
+  roomCode?: string;
+  role?: Role;
+  isLeader?: boolean;
+  connected?: boolean;
 }
 
 export interface Round {
   roundNumber: number; // 1 to 5
-  leaderSocketId: string;
+  leaderId: string;
   teamSize: number;
-  selectedTeam: string[]; // socketIds
-  teamVotes: Record<string, TeamVoteAction>; // Mapping socketId -> Vote
-  missionVotes: Record<string, MissionVoteAction>; // Mapping socketId -> Vote
+  selectedTeam: string[];
+  teamVotes: Record<string, TeamVoteAction>;
+  missionVotes: Record<string, MissionVoteAction>;
   status: 'PENDING' | 'TEAM_APPROVED' | 'TEAM_REJECTED' | 'MISSION_SUCCESS' | 'MISSION_FAILED';
   failedVotesCount?: number;
 }
@@ -33,6 +35,6 @@ export interface GameState {
 
 export interface Room {
   code: string;
-  hostSocketId: string;
+  hostId: string;
   gameState: GameState;
 }

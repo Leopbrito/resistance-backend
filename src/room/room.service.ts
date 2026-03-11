@@ -6,20 +6,13 @@ import { GamePhase } from '../shared/enums';
 export class RoomService {
   private rooms: Record<string, Room> = {};
 
-  createRoom(hostSocketId: string, hostName: string): Room {
+  createRoom(hostPlayer: Player): Room {
     const code = this.generateRoomCode();
-
-    const hostPlayer: Player = {
-      socketId: hostSocketId,
-      name: hostName,
-      isLeader: false,
-      isHost: true,
-      roomCode: code,
-    };
+    hostPlayer.roomCode = code;
 
     const newRoom: Room = {
       code,
-      hostSocketId,
+      hostId: hostPlayer.id,
       gameState: {
         phase: GamePhase.WAITING,
         me: hostPlayer,
@@ -44,18 +37,18 @@ export class RoomService {
     return room;
   }
 
-  public joinRoom(code: string, socketId: string, playerName: string): Room {
-    const room = this.getRoom(code);
+  public joinRoom(player: Player): Room {
+    const room = this.getRoom(player.roomCode!);
 
     if (room.gameState.phase !== GamePhase.WAITING) {
       throw new BadRequestException('Game has already started');
     }
 
-    if (room.gameState.players.some((p) => p.socketId === socketId)) {
+    if (room.gameState.players.some((p) => p.id === player.id)) {
       throw new BadRequestException('Player already in room');
     }
 
-    if (room.gameState.players.some((p) => p.name.toLowerCase() === playerName.toLowerCase())) {
+    if (room.gameState.players.some((p) => p.name.toLowerCase() === player.name.toLowerCase())) {
       throw new BadRequestException('A player with this name is already in the room');
     }
 
@@ -63,38 +56,25 @@ export class RoomService {
       throw new BadRequestException('Room is full (max 10 players)');
     }
 
-    const newPlayer: Player = {
-      socketId,
-      name: playerName,
-      isLeader: false,
-      isHost: false,
-      roomCode: code,
-    };
-
-    room.gameState.players.push(newPlayer);
+    room.gameState.players.push(player);
     return room;
   }
 
-  public removePlayer(socketId: string) {
+  public removePlayer(id: string) {
     for (const code in this.rooms) {
       const room = this.rooms[code];
-      const playerIndex = room.gameState.players.findIndex((p) => p.socketId === socketId);
+      const playerIndex = room.gameState.players.findIndex((p) => p.id === id);
 
       if (playerIndex !== -1) {
         room.gameState.players.splice(playerIndex, 1);
 
-        // If room is empty, delete it
         if (room.gameState.players.length === 0) {
           delete this.rooms[code];
-        } else if (room.hostSocketId === socketId) {
-          // Reassign host if host leaves
-          room.hostSocketId = room.gameState.players[0].socketId;
+        } else if (room.hostId === id) {
+          room.hostId = room.gameState.players[0].socketId;
         }
-
-        return code;
       }
     }
-    return null;
   }
 
   private generateRoomCode(): string {

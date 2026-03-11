@@ -8,10 +8,10 @@ import { GameState, Player, Room, Round } from '../shared/interfaces';
 export class GameService {
   constructor(private readonly roomService: RoomService) {}
 
-  public startGame(roomCode: string, socketId: string): Room {
-    const room = this.roomService.getRoom(roomCode);
+  public startGame(player: Player): Room {
+    const room = this.roomService.getRoom(player.roomCode!);
 
-    if (room.hostSocketId !== socketId) {
+    if (room.hostId !== player.id) {
       throw new BadRequestException('Apenas o criador da sala pode iniciar o jogo');
     }
 
@@ -90,7 +90,7 @@ export class GameService {
 
     const newRound: Round = {
       roundNumber,
-      leaderSocketId: newLeader.socketId,
+      leaderId: newLeader.id,
       teamSize: requiredTeamSize,
       selectedTeam: [],
       teamVotes: {},
@@ -103,8 +103,8 @@ export class GameService {
     gameState.phase = GamePhase.TEAM_SELECTION;
   }
 
-  selectTeam(roomCode: string, socketId: string, selectedPlayers: string[]): Room {
-    const room = this.roomService.getRoom(roomCode);
+  selectTeam(player: Player, selectedPlayers: string[]): Room {
+    const room = this.roomService.getRoom(player.roomCode!);
     const { gameState } = room;
 
     if (gameState.phase !== GamePhase.TEAM_SELECTION) {
@@ -113,12 +113,12 @@ export class GameService {
 
     const currentRound = gameState.rounds[gameState.currentRoundIndex];
 
-    if (currentRound.leaderSocketId !== socketId) {
+    if (currentRound.leaderId !== player.id) {
       throw new BadRequestException('Apenas o líder pode escolher a equipe');
     }
 
     selectedPlayers.forEach((selectedId) => {
-      if (!gameState.players.find((p) => p.socketId === selectedId)) {
+      if (!gameState.players.find((p) => p.id === selectedId)) {
         throw new BadRequestException('Jogador selecionado inválido');
       }
     });
@@ -128,8 +128,8 @@ export class GameService {
     return room;
   }
 
-  submitSelectedMissionTeam(roomCode: string, socketId: string, selectedPlayers: string[]): Room {
-    const room = this.roomService.getRoom(roomCode);
+  submitSelectedMissionTeam(player: Player, selectedPlayers: string[]): Room {
+    const room = this.roomService.getRoom(player.roomCode!);
     const { gameState } = room;
 
     if (gameState.phase !== GamePhase.TEAM_SELECTION) {
@@ -138,7 +138,7 @@ export class GameService {
 
     const currentRound = gameState.rounds[gameState.currentRoundIndex];
 
-    if (currentRound.leaderSocketId !== socketId) {
+    if (currentRound.leaderId !== player.id) {
       throw new BadRequestException('Apenas o líder pode escolher a equipe');
     }
 
@@ -146,9 +146,8 @@ export class GameService {
       throw new BadRequestException(`Necessário selecionar exatamente ${currentRound.teamSize} jogadores`);
     }
 
-    // Valida se os escolhidos existem na sala
     selectedPlayers.forEach((selectedId) => {
-      if (!gameState.players.find((p) => p.socketId === selectedId)) {
+      if (!gameState.players.find((p) => p.id === selectedId)) {
         throw new BadRequestException('Jogador selecionado inválido');
       }
     });
@@ -159,8 +158,8 @@ export class GameService {
     return room;
   }
 
-  voteTeam(roomCode: string, socketId: string, vote: TeamVoteAction): Room {
-    const room = this.roomService.getRoom(roomCode);
+  voteTeam(player: Player, vote: TeamVoteAction): Room {
+    const room = this.roomService.getRoom(player.roomCode!);
     const { gameState } = room;
 
     if (gameState.phase !== GamePhase.VOTING) {
@@ -169,11 +168,11 @@ export class GameService {
 
     const currentRound = gameState.rounds[gameState.currentRoundIndex];
 
-    if (currentRound.teamVotes[socketId]) {
+    if (currentRound.teamVotes[player.id]) {
       throw new BadRequestException('Você já enviou seu voto');
     }
 
-    currentRound.teamVotes[socketId] = vote;
+    currentRound.teamVotes[player.id] = vote;
 
     // Verifica se todos votaram
     const totalVotes = Object.keys(currentRound.teamVotes).length;
@@ -227,7 +226,7 @@ export class GameService {
     gameState.players[nextLeaderIndex].isLeader = true;
 
     // Limpa estado para nova tentativa de seleção
-    currentRound.leaderSocketId = gameState.players[nextLeaderIndex].socketId;
+    currentRound.leaderId = gameState.players[nextLeaderIndex].id;
     currentRound.selectedTeam = [];
     currentRound.teamVotes = {};
     currentRound.status = 'PENDING';
@@ -235,8 +234,8 @@ export class GameService {
     gameState.phase = GamePhase.TEAM_SELECTION;
   }
 
-  submitMissionVote(roomCode: string, socketId: string, vote: MissionVoteAction, resolveMissionResult: () => void): Room {
-    const room = this.roomService.getRoom(roomCode);
+  submitMissionVote(player: Player, vote: MissionVoteAction, resolveMissionResult: () => void): Room {
+    const room = this.roomService.getRoom(player.roomCode!);
     const { gameState } = room;
 
     if (gameState.phase !== GamePhase.MISSION) {
@@ -245,20 +244,15 @@ export class GameService {
 
     const currentRound = gameState.rounds[gameState.currentRoundIndex];
 
-    if (!currentRound.selectedTeam.includes(socketId)) {
+    if (!currentRound.selectedTeam.includes(player.id)) {
       throw new BadRequestException('Apenas a equipe escalada pode realizar a missão');
     }
 
-    if (currentRound.missionVotes[socketId]) {
+    if (currentRound.missionVotes[player.id]) {
       throw new BadRequestException('Você já executou sua parte da missão');
     }
 
-    const player = gameState.players.find((p) => p.socketId === socketId);
-    if (!player) {
-      throw new BadRequestException('Jogador não encontrado');
-    }
-
-    currentRound.missionVotes[socketId] = vote;
+    currentRound.missionVotes[player.id] = vote;
 
     const totalMissionVotes = Object.keys(currentRound.missionVotes).length;
 
