@@ -95,6 +95,7 @@ export class GameService {
       selectedTeam: [],
       teamVotes: {},
       missionVotes: {},
+      missionVoteResult: [],
       status: 'PENDING',
     };
 
@@ -269,6 +270,7 @@ export class GameService {
 
     let failedVotes = 0;
     Object.values(currentRound.missionVotes).forEach((v) => {
+      currentRound.missionVoteResult.push(v);
       if (v === MissionVoteAction.FAIL) failedVotes++;
     });
 

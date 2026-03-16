@@ -180,19 +180,43 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       });
       this.emitGameStateAsync(room);
       if (resolveResultMission) {
-        this.emitRevealMissionResult(player.roomCode!);
+        this.emitOpenMissionResultScreen(room);
       }
     } catch (e) {
       client.emit('error', e.message);
     }
   }
 
-  private emitRevealRoles(room: Room) {
-    this.server.to(room.code).emit(SocketEvent.REVEAL_ROLES);
+  @UsePipes(new ValidationPipe())
+  @SubscribeMessage(SocketEvent.SUBMIT_MISSION_RESULT_REVEAL)
+  handleSubmitMissionResultReveal(@ConnectedSocket() client: Socket) {
+    const player = this.playerService.getPlayerBySocketId(client.id);
+    if (!player) return;
+
+    try {
+      const room = this.roomService.getRoom(player.roomCode!);
+      this.emitRevealMissionResult(room);
+    } catch (e) {
+      client.emit('error', e.message);
+    }
   }
 
-  private emitRevealMissionResult(roomCode: string) {
-    this.server.to(roomCode).emit(SocketEvent.REVEAL_MISSION_RESULT);
+  private emitRevealRoles(room: Room) {
+    room.gameState.players.forEach((player) => {
+      this.server.to(player.socketId).emit(SocketEvent.REVEAL_ROLES);
+    });
+  }
+
+  private emitRevealMissionResult(room: Room) {
+    room.gameState.players.forEach((player) => {
+      this.server.to(player.socketId).emit(SocketEvent.REVEAL_MISSION_RESULT);
+    });
+  }
+
+  private emitOpenMissionResultScreen(room: Room) {
+    room.gameState.players.forEach((player) => {
+      this.server.to(player.socketId).emit(SocketEvent.OPEN_MISSION_RESULT_SCREEN);
+    });
   }
 
   private emitGameStateAsync(room: Room, isReconnection: boolean = false) {

@@ -18,6 +18,7 @@ export interface Round {
   selectedTeam: string[];
   teamVotes: Record<string, TeamVoteAction>;
   missionVotes: Record<string, MissionVoteAction>;
+  missionVoteResult: MissionVoteAction[];
   status: 'PENDING' | 'TEAM_APPROVED' | 'TEAM_REJECTED' | 'MISSION_SUCCESS' | 'MISSION_FAILED';
   failedVotesCount?: number;
 }
