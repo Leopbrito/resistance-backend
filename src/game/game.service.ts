@@ -155,6 +155,7 @@ export class GameService {
 
     currentRound.selectedTeam = selectedPlayers;
     gameState.phase = GamePhase.VOTING;
+    currentRound.currentTeamVoterId = currentRound.leaderId;
 
     return room;
   }
@@ -169,16 +170,24 @@ export class GameService {
 
     const currentRound = gameState.rounds[gameState.currentRoundIndex];
 
+    if (currentRound.currentTeamVoterId && currentRound.currentTeamVoterId !== player.id) {
+      throw new BadRequestException('Aguarde sua vez de votar.');
+    }
+
     if (currentRound.teamVotes[player.id]) {
       throw new BadRequestException('Você já enviou seu voto');
     }
 
     currentRound.teamVotes[player.id] = vote;
 
-    // Verifica se todos votaram
     const totalVotes = Object.keys(currentRound.teamVotes).length;
     if (totalVotes === gameState.players.length) {
+      currentRound.currentTeamVoterId = undefined;
       this.resolveTeamVotes(gameState);
+    } else {
+      const currentPlayerIndex = gameState.players.findIndex((p) => p.id === player.id);
+      const nextPlayerIndex = (currentPlayerIndex + 1) % gameState.players.length;
+      currentRound.currentTeamVoterId = gameState.players[nextPlayerIndex].id;
     }
 
     return room;
@@ -231,6 +240,7 @@ export class GameService {
     currentRound.selectedTeam = [];
     currentRound.teamVotes = {};
     currentRound.status = 'PENDING';
+    currentRound.currentTeamVoterId = undefined;
 
     gameState.phase = GamePhase.TEAM_SELECTION;
   }

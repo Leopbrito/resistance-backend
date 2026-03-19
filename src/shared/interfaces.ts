@@ -21,6 +21,7 @@ export interface Round {
   missionVoteResult: MissionVoteAction[];
   status: 'PENDING' | 'TEAM_APPROVED' | 'TEAM_REJECTED' | 'MISSION_SUCCESS' | 'MISSION_FAILED';
   failedVotesCount?: number;
+  currentTeamVoterId?: string;
 }
 
 export interface GameState {
