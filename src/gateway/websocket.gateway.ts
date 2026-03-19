@@ -9,7 +9,7 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { MissionVoteAction, Role, SocketEvent } from 'src/shared/enums';
+import { GamePhase, MissionVoteAction, Role, SocketEvent } from 'src/shared/enums';
 import { GameService } from '../game/game.service';
 import { PlayerService } from '../player/player.service';
 import { RoomService } from '../room/room.service';
@@ -223,8 +223,10 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     room.gameState.players.forEach((player) => {
       const privateGameState = { ...room.gameState, me: player };
 
-      this.hideSpysforResistancePlayer(privateGameState);
-      this.hideMissionVotes(privateGameState);
+      if (privateGameState.phase !== GamePhase.FINISHED) {
+        this.hideSpysforResistancePlayer(privateGameState);
+        this.hideMissionVotes(privateGameState);
+      }
 
       this.server
         .to(player.socketId)
