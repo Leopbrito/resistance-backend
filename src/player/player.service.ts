@@ -48,6 +48,10 @@ export class PlayerService {
     ]);
   }
 
+  public async releaseSocket(socketId: string): Promise<void> {
+    await this.redisService.del(this.getSocketKey(socketId));
+  }
+
   public async removePlayer(playerId: string): Promise<void> {
     const player = await this.getPlayer(playerId);
     const keysToDelete: string[] = [this.getPlayerKey(playerId)];

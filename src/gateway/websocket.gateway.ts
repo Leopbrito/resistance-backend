@@ -34,12 +34,15 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   ) {}
 
   async handleConnection(client: Socket) {
-    const playerId = client.handshake.query.playerId as string;
+    const playerId = (client.handshake.auth?.playerId || client.handshake.query.playerId) as string;
     this.logger.log(`Client connected: ${playerId}  ${client.id}`);
 
     if (playerId) {
       const player = await this.playerService.getPlayer(playerId);
       if (player) {
+        if (player.socketId && player.socketId !== client.id) {
+          await this.playerService.releaseSocket(player.socketId);
+        }
         player.socketId = client.id;
         player.connected = true;
         await this.playerService.savePlayer(player);
@@ -54,7 +57,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
               roomPlayer.connected = true;
               await this.roomService.saveRoom(room);
             }
-            this.emitGameStateAsync(room, true);
+            this.emitGameStateAsync(room, player.id);
           } catch (e) {
             this.logger.warn(`Could not restore room ${player.roomCode}: ${e.message}`);
           }
@@ -68,6 +71,12 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
     const player = await this.playerService.getPlayerBySocketId(client.id);
     if (!player) return;
+
+    // Socket já substituído por uma reconexão (ex.: refresh): o disconnect antigo não deve derrubar o jogador
+    if (player.socketId !== client.id) {
+      await this.playerService.releaseSocket(client.id);
+      return;
+    }
 
     player.connected = false;
     await this.playerService.savePlayer(player);
@@ -88,7 +97,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
     setTimeout(async () => {
       const currentPlayer = await this.playerService.getPlayer(player.id);
-      if (currentPlayer && !currentPlayer.connected) {
+      if (currentPlayer && !currentPlayer.connected && currentPlayer.socketId === client.id) {
         if (currentPlayer.roomCode) {
           await this.roomService.removePlayer(currentPlayer.id, currentPlayer.roomCode);
           try {
@@ -258,7 +267,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     });
   }
 
-  private emitGameStateAsync(room: Room, isReconnection: boolean = false) {
+  private emitGameStateAsync(room: Room, reconnectingPlayerId?: string) {
     room.gameState.players.forEach((player) => {
       const privateGameState = { ...room.gameState, me: player };
 
@@ -269,7 +278,10 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
       this.server
         .to(player.socketId)
-        .emit(isReconnection ? SocketEvent.RECONNECT : SocketEvent.GAME_STATE_UPDATE, privateGameState);
+        .emit(
+          player.id === reconnectingPlayerId ? SocketEvent.RECONNECT : SocketEvent.GAME_STATE_UPDATE,
+          privateGameState,
+        );
     });
   }
 
