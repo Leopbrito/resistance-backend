@@ -2,13 +2,13 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { TEAM_SIZE_MISSION_CONFIGS, TEAM_SIZE_SPY_CONFIGS } from 'src/config/game.config';
 import { RoomService } from '../room/room.service';
 import { AckScreen, GamePhase, MissionVoteAction, Role, TeamVoteAction } from '../shared/enums';
-import { GameState, Player, Room, Round } from '../shared/interfaces';
+import { GameState, Player, PlayerSession, Room, Round } from '../shared/interfaces';
 
 @Injectable()
 export class GameService {
   constructor(private readonly roomService: RoomService) {}
 
-  public async startGame(player: Player): Promise<Room> {
+  public async startGame(player: PlayerSession): Promise<Room> {
     const room = await this.roomService.getRoom(player.roomCode!);
 
     if (room.hostId !== player.id) {
@@ -108,7 +108,7 @@ export class GameService {
     gameState.phase = GamePhase.TEAM_SELECTION;
   }
 
-  public async selectTeam(player: Player, selectedPlayers: string[]): Promise<Room> {
+  public async selectTeam(player: PlayerSession, selectedPlayers: string[]): Promise<Room> {
     const room = await this.roomService.getRoom(player.roomCode!);
     const { gameState } = room;
 
@@ -134,7 +134,7 @@ export class GameService {
     return room;
   }
 
-  public async submitSelectedMissionTeam(player: Player, selectedPlayers: string[]): Promise<Room> {
+  public async submitSelectedMissionTeam(player: PlayerSession, selectedPlayers: string[]): Promise<Room> {
     const room = await this.roomService.getRoom(player.roomCode!);
     const { gameState } = room;
 
@@ -166,7 +166,7 @@ export class GameService {
     return room;
   }
 
-  public async voteTeam(player: Player, vote: TeamVoteAction): Promise<Room> {
+  public async voteTeam(player: PlayerSession, vote: TeamVoteAction): Promise<Room> {
     const room = await this.roomService.getRoom(player.roomCode!);
     const { gameState } = room;
 
@@ -318,7 +318,7 @@ export class GameService {
   }
 
   public async submitMissionVote(
-    player: Player,
+    player: PlayerSession,
     vote: MissionVoteAction,
     resolveMissionResult: () => void,
   ): Promise<Room> {
@@ -353,7 +353,7 @@ export class GameService {
   }
 
   /** Marca uma tela como vista pelo jogador (persistido para o refresh voltar à tela certa). */
-  public async ackScreen(player: Player, screen: AckScreen): Promise<Room> {
+  public async ackScreen(player: PlayerSession, screen: AckScreen): Promise<Room> {
     const room = await this.roomService.getRoom(player.roomCode!);
     const roomPlayer = room.gameState.players.find((p) => p.id === player.id);
     if (!roomPlayer) throw new BadRequestException('Jogador não está na sala');
@@ -375,7 +375,7 @@ export class GameService {
   }
 
   /** Persiste que o resultado da missão pendente do jogador já foi revelado (cards virados). */
-  public async markMissionResultRevealed(player: Player): Promise<Room> {
+  public async markMissionResultRevealed(player: PlayerSession): Promise<Room> {
     const room = await this.roomService.getRoom(player.roomCode!);
     const roomPlayer = room.gameState.players.find((p) => p.id === player.id);
     const round = room.gameState.rounds[roomPlayer?.pendingMissionResult ?? -1];

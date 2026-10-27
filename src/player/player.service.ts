@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { RedisService } from '../redis/redis.service';
-import { Player } from '../shared/interfaces';
+import { Player, PlayerSession } from '../shared/interfaces';
 
 const PLAYER_TTL_SECONDS = 7200; // 2 horas
 
@@ -32,8 +32,8 @@ export class PlayerService {
   }
 
   // Renova o TTL no acesso, como na sala, para partidas longas não expirarem o jogador
-  public async getPlayer(playerId: string): Promise<Player | null> {
-    const player = await this.redisService.getJson<Player>(this.getPlayerKey(playerId));
+  public async getPlayer(playerId: string): Promise<PlayerSession | null> {
+    const player = await this.redisService.getJson<PlayerSession>(this.getPlayerKey(playerId));
     if (player) {
       await Promise.all([
         this.redisService.expire(this.getPlayerKey(playerId), PLAYER_TTL_SECONDS),
@@ -43,15 +43,22 @@ export class PlayerService {
     return player;
   }
 
-  public async getPlayerBySocketId(socketId: string): Promise<Player | null> {
+  public async getPlayerBySocketId(socketId: string): Promise<PlayerSession | null> {
     const playerId = await this.redisService.get(this.getSocketKey(socketId));
     if (!playerId) return null;
     return this.getPlayer(playerId);
   }
 
-  public async savePlayer(player: Player): Promise<void> {
+  public async savePlayer(player: PlayerSession): Promise<void> {
+    const session: PlayerSession = {
+      id: player.id,
+      socketId: player.socketId,
+      name: player.name,
+      roomCode: player.roomCode,
+    };
+
     await Promise.all([
-      this.redisService.setJson(this.getPlayerKey(player.id), player, PLAYER_TTL_SECONDS),
+      this.redisService.setJson(this.getPlayerKey(player.id), session, PLAYER_TTL_SECONDS),
       this.redisService.set(this.getSocketKey(player.socketId), player.id, PLAYER_TTL_SECONDS),
     ]);
   }

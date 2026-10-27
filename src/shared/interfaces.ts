@@ -15,6 +15,10 @@ export interface Player {
   gameEndSeen?: boolean;
 }
 
+// Sessão do jogador no Redis (player:<id>): só a identidade e o vínculo com socket/sala.
+// O estado de jogo (role, líder, connected, flags de tela) vive apenas em room.gameState.players.
+export type PlayerSession = Pick<Player, 'id' | 'socketId' | 'name' | 'roomCode'>;
+
 export interface Round {
   roundNumber: number; // 1 to 5
   leaderId: string;

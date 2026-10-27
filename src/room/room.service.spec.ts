@@ -181,4 +181,29 @@ describe('RoomService', () => {
       expect(await service.migrateHostIfOffline(makeRoom(false, false))).toBe(false);
     });
   });
+
+  describe('updatePlayer', () => {
+    it('patches the player inside the room and saves it', async () => {
+      const room: Room = {
+        code: 'ABCD-1234',
+        hostId: 'host-1',
+        gameState: {
+          phase: GamePhase.WAITING,
+          me: null,
+          players: [createMockHost()],
+          resistanceWins: 0,
+          spyWins: 0,
+          rounds: [],
+          currentRoundIndex: 0,
+          failedTeamsInRow: 0,
+        },
+      };
+      redisService.getJson.mockResolvedValue(room);
+
+      const updated = await service.updatePlayer('ABCD-1234', 'host-1', { connected: false });
+
+      expect(updated.gameState.players[0].connected).toBe(false);
+      expect(redisService.setJson).toHaveBeenCalledWith('room:ABCD-1234', updated, 7200);
+    });
+  });
 });

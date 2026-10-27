@@ -14,7 +14,7 @@ import { GameService } from '../game/game.service';
 import { PlayerService } from '../player/player.service';
 import { RoomService } from '../room/room.service';
 import { AckScreenDto, CreateRoomDto, JoinRoomDto, MissionVoteDto, SelectTeamDto, VoteTeamDto } from '../shared/dtos';
-import { GameState, Player, Room } from '../shared/interfaces';
+import { GameState, PlayerSession, Room } from '../shared/interfaces';
 
 const DISCONNECT_IN_ONE_MINUTES = 60000;
 const OFFLINE_ACTOR_SKIP_MS = 60000;
@@ -53,19 +53,15 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
           this.server.in(previousSocketId).disconnectSockets(true);
         }
         player.socketId = client.id;
-        player.connected = true;
         await this.playerService.savePlayer(player);
 
         if (player.roomCode) {
           try {
             client.join(player.roomCode);
-            const room = await this.roomService.getRoom(player.roomCode);
-            const roomPlayer = room.gameState.players.find((p) => p.id === player.id);
-            if (roomPlayer) {
-              roomPlayer.socketId = client.id;
-              roomPlayer.connected = true;
-              await this.roomService.saveRoom(room);
-            }
+            const room = await this.roomService.updatePlayer(player.roomCode, player.id, {
+              socketId: client.id,
+              connected: true,
+            });
             this.emitGameStateAsync(room, player.id);
           } catch (e) {
             this.logger.warn(`Could not restore room ${player.roomCode}: ${e.message}`);
@@ -91,17 +87,9 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       return;
     }
 
-    player.connected = false;
-    await this.playerService.savePlayer(player);
-
     if (player.roomCode) {
       try {
-        const room = await this.roomService.getRoom(player.roomCode);
-        const roomPlayer = room.gameState.players.find((p) => p.id === player.id);
-        if (roomPlayer) {
-          roomPlayer.connected = false;
-          await this.roomService.saveRoom(room);
-        }
+        const room = await this.roomService.updatePlayer(player.roomCode, player.id, { connected: false });
         this.emitGameStateAsync(room);
       } catch (e) {
         this.logger.warn(`Room ${player.roomCode} not found during disconnect: ${e.message}`);
@@ -109,14 +97,15 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
 
     setTimeout(async () => {
+      // Reconectar sempre troca o socketId; se ainda é o mesmo, o jogador continua offline
       const currentPlayer = await this.playerService.getPlayer(player.id);
-      if (currentPlayer && !currentPlayer.connected && currentPlayer.socketId === client.id) {
+      if (currentPlayer && currentPlayer.socketId === client.id) {
         await this.handleOfflineTimeout(currentPlayer);
       }
     }, DISCONNECT_IN_ONE_MINUTES);
   }
 
-  private async handleOfflineTimeout(player: Player) {
+  private async handleOfflineTimeout(player: PlayerSession) {
     if (player.roomCode) {
       try {
         const room = await this.roomService.getRoom(player.roomCode);
@@ -144,7 +133,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   }
 
   // Sessão desconhecida (TTL expirado, Redis limpo): avisa o cliente em vez de ignorar em silêncio
-  private async requirePlayer(client: Socket): Promise<Player | null> {
+  private async requirePlayer(client: Socket): Promise<PlayerSession | null> {
     const player = await this.playerService.getPlayerBySocketId(client.id);
     if (!player) {
       client.emit(SocketEvent.SESSION_INVALID);

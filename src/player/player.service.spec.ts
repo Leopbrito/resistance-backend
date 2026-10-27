@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { PlayerService } from './player.service';
 import { RedisService } from '../redis/redis.service';
+import { Role } from '../shared/enums';
 import { Player } from '../shared/interfaces';
 
 describe('PlayerService', () => {
@@ -48,7 +49,11 @@ describe('PlayerService', () => {
     expect(player.socketId).toBe('sock-123');
     expect(player.connected).toBe(true);
 
-    expect(redisService.setJson).toHaveBeenCalledWith(`player:${player.id}`, player, 7200);
+    expect(redisService.setJson).toHaveBeenCalledWith(
+      `player:${player.id}`,
+      { id: player.id, socketId: 'sock-123', name: 'Agent Cooper', roomCode: undefined },
+      7200,
+    );
     expect(redisService.set).toHaveBeenCalledWith('socket_player:sock-123', player.id, 7200);
   });
 
@@ -121,5 +126,26 @@ describe('PlayerService', () => {
 
     expect(await service.getPlayer('ghost')).toBeNull();
     expect(redisService.expire).not.toHaveBeenCalled();
+  });
+
+  it('should persist only the session, not the game state', async () => {
+    const inGame: Player = {
+      id: 'p-1',
+      name: 'Agent',
+      isHost: true,
+      socketId: 'sock-1',
+      roomCode: 'ABCD-1234',
+      role: Role.SPY,
+      isLeader: true,
+      connected: true,
+    };
+
+    await service.savePlayer(inGame);
+
+    expect(redisService.setJson).toHaveBeenCalledWith(
+      'player:p-1',
+      { id: 'p-1', socketId: 'sock-1', name: 'Agent', roomCode: 'ABCD-1234' },
+      7200,
+    );
   });
 });

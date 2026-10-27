@@ -2,7 +2,7 @@ import { GamePhase, Role, SocketEvent } from '../shared/enums';
 import { GameService } from '../game/game.service';
 import { PlayerService } from '../player/player.service';
 import { RoomService } from '../room/room.service';
-import { Player, Room } from '../shared/interfaces';
+import { Player, PlayerSession, Room } from '../shared/interfaces';
 import { WebsocketGateway } from './websocket.gateway';
 
 describe('WebsocketGateway reconnection', () => {
@@ -37,14 +37,20 @@ describe('WebsocketGateway reconnection', () => {
 
   beforeEach(() => {
     jest.useFakeTimers();
-    const players = ['p1', 'p2', 'p3'].map(makePlayer);
+    const roomPlayers = ['p1', 'p2', 'p3'].map(makePlayer);
+    const players: PlayerSession[] = roomPlayers.map(({ id, name, socketId, roomCode }) => ({
+      id,
+      name,
+      socketId,
+      roomCode,
+    }));
     room = {
       code: 'ABCD-1234',
       hostId: 'p1',
       gameState: {
         phase: GamePhase.TEAM_SELECTION,
         me: null,
-        players: players.map((p) => ({ ...p })),
+        players: roomPlayers,
         resistanceWins: 0,
         spyWins: 0,
         rounds: [],
@@ -67,6 +73,10 @@ describe('WebsocketGateway reconnection', () => {
     roomService = {
       getRoom: jest.fn(async () => room),
       saveRoom: jest.fn(),
+      updatePlayer: jest.fn(async (_code: string, id: string, patch: Partial<Player>) => {
+        Object.assign(room.gameState.players.find((p) => p.id === id)!, patch);
+        return room;
+      }),
       removePlayer: jest.fn(),
       migrateHostIfOffline: jest.fn(),
     } as any;
@@ -107,17 +117,17 @@ describe('WebsocketGateway reconnection', () => {
 
     await gateway.handleDisconnect(makeClient('sock-p2'));
 
-    expect(player.connected).toBe(true);
-    expect(playerService.savePlayer).not.toHaveBeenCalled();
+    expect(room.gameState.players[1].connected).toBe(true);
+    expect(roomService.updatePlayer).not.toHaveBeenCalled();
     expect(playerService.releaseSocket).toHaveBeenCalledWith('sock-p2');
   });
 
   it('does not remove a player that reconnected before the grace period ends', async () => {
     await gateway.handleDisconnect(makeClient('sock-p2'));
     const player = (await playerService.getPlayer('p2'))!;
-    expect(player.connected).toBe(false);
+    expect(room.gameState.players[1].connected).toBe(false);
 
-    player.connected = true;
+    room.gameState.players[1].connected = true;
     player.socketId = 'sock-new';
     await jest.advanceTimersByTimeAsync(60000);
 
@@ -161,7 +171,7 @@ describe('WebsocketGateway reconnection', () => {
   });
 
   it('tells the client the session is invalid when the room expired', async () => {
-    roomService.getRoom.mockRejectedValue(new Error('Room not found'));
+    roomService.updatePlayer.mockRejectedValue(new Error('Room not found'));
     const client = makeClient('sock-new', 'p2');
 
     await gateway.handleConnection(client);

@@ -27,6 +27,17 @@ export class RoomService {
     await this.redisService.setJson(this.getRoomKey(room.code), room, ROOM_TTL_SECONDS);
   }
 
+  /** Atualiza o jogador na sala (única fonte do estado de jogo do jogador) e persiste. */
+  public async updatePlayer(roomCode: string, playerId: string, patch: Partial<Player>): Promise<Room> {
+    const room = await this.getRoom(roomCode);
+    const roomPlayer = room.gameState.players.find((p) => p.id === playerId);
+    if (roomPlayer) {
+      Object.assign(roomPlayer, patch);
+      await this.saveRoom(room);
+    }
+    return room;
+  }
+
   public async deleteRoom(code: string): Promise<void> {
     await this.redisService.del(this.getRoomKey(code));
   }
