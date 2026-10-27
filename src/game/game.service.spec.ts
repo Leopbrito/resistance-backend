@@ -1,5 +1,5 @@
 import { RoomService } from '../room/room.service';
-import { GamePhase, MissionVoteAction, Role, TeamVoteAction } from '../shared/enums';
+import { AckScreen, GamePhase, MissionVoteAction, Role, TeamVoteAction } from '../shared/enums';
 import { Player, Room, Round } from '../shared/interfaces';
 import { GameService } from './game.service';
 
@@ -147,6 +147,58 @@ describe('GameService offline actors', () => {
       expect(onResolved).toHaveBeenCalled();
       expect(round.status).toBe('MISSION_SUCCESS');
       expect(room.gameState.resistanceWins).toBe(1);
+    });
+  });
+
+  describe('screen acknowledgement', () => {
+    it('resets the seen flags when the game starts', async () => {
+      room.gameState.phase = GamePhase.WAITING;
+      room.gameState.rounds = [];
+      room.gameState.players.forEach((p) => {
+        p.rolesSeen = true;
+        p.gameEndSeen = true;
+        p.pendingMissionResult = 2;
+      });
+
+      await service.startGame(room.gameState.players[0]);
+
+      room.gameState.players.forEach((p) => {
+        expect(p.rolesSeen).toBe(false);
+        expect(p.gameEndSeen).toBe(false);
+        expect(p.pendingMissionResult).toBeNull();
+      });
+    });
+
+    it('flags every player with the pending mission result when the mission resolves', async () => {
+      room.gameState.phase = GamePhase.MISSION;
+      round.selectedTeam = ['p2', 'p3'];
+      round.missionVotes = { p2: MissionVoteAction.SUCCESS };
+
+      await service.submitMissionVote(room.gameState.players[2], MissionVoteAction.SUCCESS, jest.fn());
+
+      room.gameState.players.forEach((p) => expect(p.pendingMissionResult).toBe(0));
+      expect(room.gameState.currentRoundIndex).toBe(1);
+    });
+
+    it.each([
+      [AckScreen.ROLES, 'rolesSeen', true],
+      [AckScreen.MISSION_RESULT, 'pendingMissionResult', null],
+      [AckScreen.GAME_END, 'gameEndSeen', true],
+    ] as const)('ack %s updates only the acknowledging player', async (screen, field, expected) => {
+      room.gameState.players.forEach((p) => (p.pendingMissionResult = 0));
+
+      await service.ackScreen(room.gameState.players[1], screen);
+
+      expect(room.gameState.players[1][field]).toBe(expected);
+      expect(room.gameState.players[0][field]).not.toBe(expected);
+    });
+
+    it('persists that the pending mission result was revealed', async () => {
+      room.gameState.players[1].pendingMissionResult = 0;
+
+      await service.markMissionResultRevealed(room.gameState.players[1]);
+
+      expect(round.resultRevealed).toBe(true);
     });
   });
 });

@@ -1,5 +1,5 @@
 import { IsString, IsNotEmpty, Length, IsEnum, IsArray } from 'class-validator';
-import { MissionVoteAction, TeamVoteAction } from './enums';
+import { AckScreen, MissionVoteAction, TeamVoteAction } from './enums';
 
 export class CreateRoomDto {
   @IsString()
@@ -33,4 +33,9 @@ export class VoteTeamDto {
 export class MissionVoteDto {
   @IsEnum(MissionVoteAction)
   vote: MissionVoteAction;
+}
+
+export class AckScreenDto {
+  @IsEnum(AckScreen)
+  screen: AckScreen;
 }

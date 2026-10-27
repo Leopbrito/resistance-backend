@@ -9,6 +9,10 @@ export interface Player {
   role?: Role;
   isLeader?: boolean;
   connected?: boolean;
+  // Telas já vistas, para o refresh voltar ao ponto certo da partida
+  rolesSeen?: boolean;
+  pendingMissionResult?: number | null; // índice do round cujo resultado ainda não foi visto
+  gameEndSeen?: boolean;
 }
 
 export interface Round {
@@ -22,6 +26,7 @@ export interface Round {
   status: 'PENDING' | 'TEAM_APPROVED' | 'TEAM_REJECTED' | 'MISSION_SUCCESS' | 'MISSION_FAILED';
   failedVotesCount?: number;
   currentTeamVoterId?: string;
+  resultRevealed?: boolean; // cards do resultado da missão já virados
   skippedTeamVoters?: string[]; // votantes offline pulados (não entram na contagem)
 }
 

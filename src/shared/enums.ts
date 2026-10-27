@@ -21,6 +21,12 @@ export enum GamePhase {
   FINISHED = 'FINISHED',
 }
 
+export enum AckScreen {
+  ROLES = 'roles',
+  MISSION_RESULT = 'missionResult',
+  GAME_END = 'gameEnd',
+}
+
 export enum SocketEvent {
   // Server to Client
   ERROR = 'error',
@@ -41,4 +47,5 @@ export enum SocketEvent {
   VOTE_TEAM_APPROVAL = 'voteTeamApproval',
   SUBMIT_MISSION_VOTE = 'submitMissionVote',
   SUBMIT_MISSION_RESULT_REVEAL = 'submitMissionResultReveal',
+  ACK_SCREEN = 'ackScreen',
 }

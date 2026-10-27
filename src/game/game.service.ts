@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { TEAM_SIZE_MISSION_CONFIGS, TEAM_SIZE_SPY_CONFIGS } from 'src/config/game.config';
 import { RoomService } from '../room/room.service';
-import { GamePhase, MissionVoteAction, Role, TeamVoteAction } from '../shared/enums';
+import { AckScreen, GamePhase, MissionVoteAction, Role, TeamVoteAction } from '../shared/enums';
 import { GameState, Player, Room, Round } from '../shared/interfaces';
 
 @Injectable()
@@ -54,6 +54,9 @@ export class GameService {
     players.forEach((p) => {
       p.role = Role.RESISTANCE;
       p.isLeader = false;
+      p.rolesSeen = false;
+      p.pendingMissionResult = null;
+      p.gameEndSeen = false;
     });
 
     // Distribui os Espiões aleatoriamente
@@ -349,6 +352,41 @@ export class GameService {
     return room;
   }
 
+  /** Marca uma tela como vista pelo jogador (persistido para o refresh voltar à tela certa). */
+  public async ackScreen(player: Player, screen: AckScreen): Promise<Room> {
+    const room = await this.roomService.getRoom(player.roomCode!);
+    const roomPlayer = room.gameState.players.find((p) => p.id === player.id);
+    if (!roomPlayer) throw new BadRequestException('Jogador não está na sala');
+
+    switch (screen) {
+      case AckScreen.ROLES:
+        roomPlayer.rolesSeen = true;
+        break;
+      case AckScreen.MISSION_RESULT:
+        roomPlayer.pendingMissionResult = null;
+        break;
+      case AckScreen.GAME_END:
+        roomPlayer.gameEndSeen = true;
+        break;
+    }
+
+    await this.roomService.saveRoom(room);
+    return room;
+  }
+
+  /** Persiste que o resultado da missão pendente do jogador já foi revelado (cards virados). */
+  public async markMissionResultRevealed(player: Player): Promise<Room> {
+    const room = await this.roomService.getRoom(player.roomCode!);
+    const roomPlayer = room.gameState.players.find((p) => p.id === player.id);
+    const round = room.gameState.rounds[roomPlayer?.pendingMissionResult ?? -1];
+
+    if (round && !round.resultRevealed) {
+      round.resultRevealed = true;
+      await this.roomService.saveRoom(room);
+    }
+    return room;
+  }
+
   private resolveMission(gameState: GameState) {
     const currentRound = gameState.rounds[gameState.currentRoundIndex];
 
@@ -359,6 +397,7 @@ export class GameService {
     });
 
     currentRound.failedVotesCount = failedVotes;
+    gameState.players.forEach((p) => (p.pendingMissionResult = gameState.currentRoundIndex));
 
     if (failedVotes > 0) {
       currentRound.status = 'MISSION_FAILED';

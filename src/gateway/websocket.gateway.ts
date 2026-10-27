@@ -13,7 +13,7 @@ import { GamePhase, MissionVoteAction, Role, SocketEvent } from 'src/shared/enum
 import { GameService } from '../game/game.service';
 import { PlayerService } from '../player/player.service';
 import { RoomService } from '../room/room.service';
-import { CreateRoomDto, JoinRoomDto, MissionVoteDto, SelectTeamDto, VoteTeamDto } from '../shared/dtos';
+import { AckScreenDto, CreateRoomDto, JoinRoomDto, MissionVoteDto, SelectTeamDto, VoteTeamDto } from '../shared/dtos';
 import { GameState, Player, Room } from '../shared/interfaces';
 
 const DISCONNECT_IN_ONE_MINUTES = 60000;
@@ -282,8 +282,22 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     if (!player) return;
 
     try {
-      const room = await this.roomService.getRoom(player.roomCode!);
+      const room = await this.gameService.markMissionResultRevealed(player);
       this.emitRevealMissionResult(room);
+    } catch (e) {
+      client.emit('error', e.message);
+    }
+  }
+
+  @UsePipes(new ValidationPipe())
+  @SubscribeMessage(SocketEvent.ACK_SCREEN)
+  async handleAckScreen(@MessageBody() dto: AckScreenDto, @ConnectedSocket() client: Socket) {
+    const player = await this.requirePlayer(client);
+    if (!player) return;
+
+    try {
+      const room = await this.gameService.ackScreen(player, dto.screen);
+      this.emitGameStateAsync(room, undefined, player.id);
     } catch (e) {
       client.emit('error', e.message);
     }
@@ -307,8 +321,10 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     });
   }
 
-  private emitGameStateAsync(room: Room, reconnectingPlayerId?: string) {
+  private emitGameStateAsync(room: Room, reconnectingPlayerId?: string, onlyPlayerId?: string) {
     room.gameState.players.forEach((player) => {
+      if (onlyPlayerId && player.id !== onlyPlayerId) return;
+
       const privateGameState = { ...room.gameState, me: player };
 
       if (privateGameState.phase !== GamePhase.FINISHED) {
