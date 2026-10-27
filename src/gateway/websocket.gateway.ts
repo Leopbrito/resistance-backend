@@ -96,13 +96,14 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       }
     }
 
-    setTimeout(async () => {
+    const timer = setTimeout(async () => {
       // Reconectar sempre troca o socketId; se ainda é o mesmo, o jogador continua offline
       const currentPlayer = await this.playerService.getPlayer(player.id);
       if (currentPlayer && currentPlayer.socketId === client.id) {
         await this.handleOfflineTimeout(currentPlayer);
       }
     }, DISCONNECT_IN_ONE_MINUTES);
+    timer.unref?.();
   }
 
   private async handleOfflineTimeout(player: PlayerSession) {
