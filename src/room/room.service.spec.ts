@@ -4,6 +4,7 @@ import { RedisService } from '../redis/redis.service';
 import { GamePhase } from '../shared/enums';
 import { Player, Room } from '../shared/interfaces';
 import { RoomService } from './room.service';
+import { ErrorCode } from '../shared/error-codes';
 
 describe('RoomService', () => {
   let service: RoomService;
@@ -61,6 +62,9 @@ describe('RoomService', () => {
     redisService.getJson.mockResolvedValue(null);
 
     await expect(service.getRoom('ABCD-1234')).rejects.toThrow(NotFoundException);
+    await expect(service.getRoom('ABCD-1234')).rejects.toMatchObject({
+      response: { code: ErrorCode.ROOM_NOT_FOUND },
+    });
   });
 
   it('should get room and renew TTL in Redis', async () => {
@@ -148,6 +152,9 @@ describe('RoomService', () => {
     };
 
     await expect(service.joinRoom(newPlayer)).rejects.toThrow(BadRequestException);
+    await expect(service.joinRoom(newPlayer)).rejects.toMatchObject({
+      response: { code: ErrorCode.GAME_ALREADY_STARTED },
+    });
   });
   describe('migrateHostIfOffline', () => {
     const makeRoom = (hostConnected: boolean, guestConnected: boolean): Room => ({

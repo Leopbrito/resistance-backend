@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { RedisService } from '../redis/redis.service';
 import { GamePhase } from '../shared/enums';
 import { Player, Room } from '../shared/interfaces';
+import { ErrorCode, errorPayload } from '../shared/error-codes';
 
 const ROOM_TTL_SECONDS = 7200; // 2 horas
 
@@ -16,7 +17,7 @@ export class RoomService {
   public async getRoom(code: string): Promise<Room> {
     const room = await this.redisService.getJson<Room>(this.getRoomKey(code));
     if (!room) {
-      throw new NotFoundException('Room not found');
+      throw new NotFoundException(errorPayload(ErrorCode.ROOM_NOT_FOUND));
     }
     // Renova TTL no acesso
     await this.redisService.expire(this.getRoomKey(code), ROOM_TTL_SECONDS);
@@ -69,19 +70,19 @@ export class RoomService {
     const room = await this.getRoom(player.roomCode!);
 
     if (room.gameState.phase !== GamePhase.WAITING) {
-      throw new BadRequestException('Game has already started');
+      throw new BadRequestException(errorPayload(ErrorCode.GAME_ALREADY_STARTED));
     }
 
     if (room.gameState.players.some((p) => p.id === player.id)) {
-      throw new BadRequestException('Player already in room');
+      throw new BadRequestException(errorPayload(ErrorCode.PLAYER_ALREADY_IN_ROOM));
     }
 
     if (room.gameState.players.some((p) => p.name.toLowerCase() === player.name.toLowerCase())) {
-      throw new BadRequestException('A player with this name is already in the room');
+      throw new BadRequestException(errorPayload(ErrorCode.PLAYER_NAME_TAKEN));
     }
 
     if (room.gameState.players.length >= 10) {
-      throw new BadRequestException('Room is full (max 10 players)');
+      throw new BadRequestException(errorPayload(ErrorCode.ROOM_FULL, { max: 10 }));
     }
 
     room.gameState.players.push(player);

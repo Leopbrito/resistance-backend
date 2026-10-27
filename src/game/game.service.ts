@@ -3,6 +3,7 @@ import { TEAM_SIZE_MISSION_CONFIGS, TEAM_SIZE_SPY_CONFIGS } from 'src/config/gam
 import { RoomService } from '../room/room.service';
 import { AckScreen, GamePhase, MissionVoteAction, Role, TeamVoteAction } from '../shared/enums';
 import { GameState, Player, PlayerSession, Room, Round } from '../shared/interfaces';
+import { ErrorCode, errorPayload } from '../shared/error-codes';
 
 @Injectable()
 export class GameService {
@@ -12,14 +13,14 @@ export class GameService {
     const room = await this.roomService.getRoom(player.roomCode!);
 
     if (room.hostId !== player.id) {
-      throw new BadRequestException('Apenas o criador da sala pode iniciar o jogo');
+      throw new BadRequestException(errorPayload(ErrorCode.NOT_HOST));
     }
 
     const { players } = room.gameState;
     const playerCount = players.length;
 
     if (playerCount < 5 || playerCount > 10) {
-      throw new BadRequestException('The Resistance requer 5 a 10 jogadores');
+      throw new BadRequestException(errorPayload(ErrorCode.INVALID_PLAYER_COUNT, { min: 5, max: 10 }));
     }
 
     if (
@@ -27,7 +28,7 @@ export class GameService {
       room.gameState.phase === GamePhase.VOTING ||
       room.gameState.phase === GamePhase.MISSION
     ) {
-      throw new BadRequestException('Partida já foi iniciada');
+      throw new BadRequestException(errorPayload(ErrorCode.GAME_ALREADY_STARTED));
     }
 
     this.resetGameState(room.gameState);
@@ -113,18 +114,18 @@ export class GameService {
     const { gameState } = room;
 
     if (gameState.phase !== GamePhase.TEAM_SELECTION) {
-      throw new BadRequestException('Jogo não está na fase de seleção de time');
+      throw new BadRequestException(errorPayload(ErrorCode.NOT_TEAM_SELECTION_PHASE));
     }
 
     const currentRound = gameState.rounds[gameState.currentRoundIndex];
 
     if (currentRound.leaderId !== player.id) {
-      throw new BadRequestException('Apenas o líder pode escolher a equipe');
+      throw new BadRequestException(errorPayload(ErrorCode.NOT_LEADER));
     }
 
     selectedPlayers.forEach((selectedId) => {
       if (!gameState.players.find((p) => p.id === selectedId)) {
-        throw new BadRequestException('Jogador selecionado inválido');
+        throw new BadRequestException(errorPayload(ErrorCode.INVALID_SELECTED_PLAYER));
       }
     });
 
@@ -139,22 +140,22 @@ export class GameService {
     const { gameState } = room;
 
     if (gameState.phase !== GamePhase.TEAM_SELECTION) {
-      throw new BadRequestException('Jogo não está na fase de seleção de time');
+      throw new BadRequestException(errorPayload(ErrorCode.NOT_TEAM_SELECTION_PHASE));
     }
 
     const currentRound = gameState.rounds[gameState.currentRoundIndex];
 
     if (currentRound.leaderId !== player.id) {
-      throw new BadRequestException('Apenas o líder pode escolher a equipe');
+      throw new BadRequestException(errorPayload(ErrorCode.NOT_LEADER));
     }
 
     if (selectedPlayers.length !== currentRound.teamSize) {
-      throw new BadRequestException(`Necessário selecionar exatamente ${currentRound.teamSize} jogadores`);
+      throw new BadRequestException(errorPayload(ErrorCode.INVALID_TEAM_SIZE, { teamSize: currentRound.teamSize }));
     }
 
     selectedPlayers.forEach((selectedId) => {
       if (!gameState.players.find((p) => p.id === selectedId)) {
-        throw new BadRequestException('Jogador selecionado inválido');
+        throw new BadRequestException(errorPayload(ErrorCode.INVALID_SELECTED_PLAYER));
       }
     });
 
@@ -171,17 +172,17 @@ export class GameService {
     const { gameState } = room;
 
     if (gameState.phase !== GamePhase.VOTING) {
-      throw new BadRequestException('Fase incorreta. A votação do time não está ativa.');
+      throw new BadRequestException(errorPayload(ErrorCode.NOT_VOTING_PHASE));
     }
 
     const currentRound = gameState.rounds[gameState.currentRoundIndex];
 
     if (currentRound.currentTeamVoterId && currentRound.currentTeamVoterId !== player.id) {
-      throw new BadRequestException('Aguarde sua vez de votar.');
+      throw new BadRequestException(errorPayload(ErrorCode.NOT_YOUR_TURN_TO_VOTE));
     }
 
     if (currentRound.teamVotes[player.id]) {
-      throw new BadRequestException('Você já enviou seu voto');
+      throw new BadRequestException(errorPayload(ErrorCode.ALREADY_VOTED));
     }
 
     currentRound.teamVotes[player.id] = vote;
@@ -326,17 +327,17 @@ export class GameService {
     const { gameState } = room;
 
     if (gameState.phase !== GamePhase.MISSION) {
-      throw new BadRequestException('A fase não é a de Missão.');
+      throw new BadRequestException(errorPayload(ErrorCode.NOT_MISSION_PHASE));
     }
 
     const currentRound = gameState.rounds[gameState.currentRoundIndex];
 
     if (!currentRound.selectedTeam.includes(player.id)) {
-      throw new BadRequestException('Apenas a equipe escalada pode realizar a missão');
+      throw new BadRequestException(errorPayload(ErrorCode.NOT_ON_MISSION_TEAM));
     }
 
     if (currentRound.missionVotes[player.id]) {
-      throw new BadRequestException('Você já executou sua parte da missão');
+      throw new BadRequestException(errorPayload(ErrorCode.MISSION_ALREADY_PERFORMED));
     }
 
     currentRound.missionVotes[player.id] = vote;
@@ -356,7 +357,7 @@ export class GameService {
   public async ackScreen(player: PlayerSession, screen: AckScreen): Promise<Room> {
     const room = await this.roomService.getRoom(player.roomCode!);
     const roomPlayer = room.gameState.players.find((p) => p.id === player.id);
-    if (!roomPlayer) throw new BadRequestException('Jogador não está na sala');
+    if (!roomPlayer) throw new BadRequestException(errorPayload(ErrorCode.PLAYER_NOT_IN_ROOM));
 
     switch (screen) {
       case AckScreen.ROLES:

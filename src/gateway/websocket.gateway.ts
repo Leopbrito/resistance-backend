@@ -15,6 +15,7 @@ import { PlayerService } from '../player/player.service';
 import { RoomService } from '../room/room.service';
 import { AckScreenDto, CreateRoomDto, JoinRoomDto, MissionVoteDto, SelectTeamDto, VoteTeamDto } from '../shared/dtos';
 import { GameState, PlayerSession, Room } from '../shared/interfaces';
+import { toErrorPayload, validationExceptionFactory } from '../shared/error-codes';
 
 const DISCONNECT_IN_ONE_MINUTES = 60000;
 const OFFLINE_ACTOR_SKIP_MS = 60000;
@@ -144,7 +145,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   // --- ROOM EVENTS ---
 
-  @UsePipes(new ValidationPipe())
+  @UsePipes(new ValidationPipe({ exceptionFactory: validationExceptionFactory }))
   @SubscribeMessage(SocketEvent.CREATE_ROOM)
   async handleCreateRoom(@MessageBody() dto: CreateRoomDto, @ConnectedSocket() client: Socket) {
     const player = await this.playerService.createPlayer({
@@ -163,7 +164,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     return { roomCode: room.code, playerId: player.id };
   }
 
-  @UsePipes(new ValidationPipe())
+  @UsePipes(new ValidationPipe({ exceptionFactory: validationExceptionFactory }))
   @SubscribeMessage(SocketEvent.JOIN_ROOM)
   async handleJoinRoom(@MessageBody() dto: JoinRoomDto, @ConnectedSocket() client: Socket) {
     try {
@@ -180,8 +181,9 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       this.emitGameStateAsync(room);
       return { roomCode: room.code, playerId: player.id };
     } catch (error) {
-      client.emit(SocketEvent.ERROR, error.message);
-      return { success: false, error: error.message };
+      const payload = toErrorPayload(error);
+      client.emit(SocketEvent.ERROR, payload);
+      return { success: false, error: payload };
     }
   }
 
@@ -198,12 +200,12 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       this.emitGameStateAsync(room);
       this.emitRevealRoles(room);
     } catch (e) {
-      this.logger.log(`error ${e.message}`);
-      client.emit('error', e.message);
+      this.logger.log(`error ${JSON.stringify(toErrorPayload(e))}`);
+      client.emit(SocketEvent.ERROR, toErrorPayload(e));
     }
   }
 
-  @UsePipes(new ValidationPipe())
+  @UsePipes(new ValidationPipe({ exceptionFactory: validationExceptionFactory }))
   @SubscribeMessage(SocketEvent.SELECT_MISSION_TEAM)
   async handleSelectTeam(@MessageBody() dto: SelectTeamDto, @ConnectedSocket() client: Socket) {
     const player = await this.requirePlayer(client);
@@ -213,11 +215,11 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       const room = await this.gameService.selectTeam(player, dto.selectedPlayers);
       this.emitGameStateAsync(room);
     } catch (e) {
-      client.emit('error', e.message);
+      client.emit(SocketEvent.ERROR, toErrorPayload(e));
     }
   }
 
-  @UsePipes(new ValidationPipe())
+  @UsePipes(new ValidationPipe({ exceptionFactory: validationExceptionFactory }))
   @SubscribeMessage(SocketEvent.SUBMIT_SELECTED_MISSION_TEAM)
   async handleSubmitSelectedMissionTeam(@MessageBody() dto: SelectTeamDto, @ConnectedSocket() client: Socket) {
     const player = await this.requirePlayer(client);
@@ -227,11 +229,11 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       const room = await this.gameService.submitSelectedMissionTeam(player, dto.selectedPlayers);
       this.emitGameStateAsync(room);
     } catch (e) {
-      client.emit('error', e.message);
+      client.emit(SocketEvent.ERROR, toErrorPayload(e));
     }
   }
 
-  @UsePipes(new ValidationPipe())
+  @UsePipes(new ValidationPipe({ exceptionFactory: validationExceptionFactory }))
   @SubscribeMessage(SocketEvent.VOTE_TEAM_APPROVAL)
   async handleVoteTeam(@MessageBody() dto: VoteTeamDto, @ConnectedSocket() client: Socket) {
     const player = await this.requirePlayer(client);
@@ -241,11 +243,11 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       const room = await this.gameService.voteTeam(player, dto.vote);
       this.emitGameStateAsync(room);
     } catch (e) {
-      client.emit('error', e.message);
+      client.emit(SocketEvent.ERROR, toErrorPayload(e));
     }
   }
 
-  @UsePipes(new ValidationPipe())
+  @UsePipes(new ValidationPipe({ exceptionFactory: validationExceptionFactory }))
   @SubscribeMessage(SocketEvent.SUBMIT_MISSION_VOTE)
   async handleSubmitMissionVote(@MessageBody() dto: MissionVoteDto, @ConnectedSocket() client: Socket) {
     const player = await this.requirePlayer(client);
@@ -261,11 +263,11 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
         this.emitOpenMissionResultScreen(room);
       }
     } catch (e) {
-      client.emit('error', e.message);
+      client.emit(SocketEvent.ERROR, toErrorPayload(e));
     }
   }
 
-  @UsePipes(new ValidationPipe())
+  @UsePipes(new ValidationPipe({ exceptionFactory: validationExceptionFactory }))
   @SubscribeMessage(SocketEvent.SUBMIT_MISSION_RESULT_REVEAL)
   async handleSubmitMissionResultReveal(@ConnectedSocket() client: Socket) {
     const player = await this.requirePlayer(client);
@@ -275,11 +277,11 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       const room = await this.gameService.markMissionResultRevealed(player);
       this.emitRevealMissionResult(room);
     } catch (e) {
-      client.emit('error', e.message);
+      client.emit(SocketEvent.ERROR, toErrorPayload(e));
     }
   }
 
-  @UsePipes(new ValidationPipe())
+  @UsePipes(new ValidationPipe({ exceptionFactory: validationExceptionFactory }))
   @SubscribeMessage(SocketEvent.ACK_SCREEN)
   async handleAckScreen(@MessageBody() dto: AckScreenDto, @ConnectedSocket() client: Socket) {
     const player = await this.requirePlayer(client);
@@ -289,7 +291,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       const room = await this.gameService.ackScreen(player, dto.screen);
       this.emitGameStateAsync(room, undefined, player.id);
     } catch (e) {
-      client.emit('error', e.message);
+      client.emit(SocketEvent.ERROR, toErrorPayload(e));
     }
   }
 

@@ -1,4 +1,5 @@
 import { IsString, IsNotEmpty, Length, IsEnum, IsArray } from 'class-validator';
+import { ErrorCode } from './error-codes';
 import { AckScreen, MissionVoteAction, TeamVoteAction } from './enums';
 
 export class CreateRoomDto {
@@ -10,7 +11,7 @@ export class CreateRoomDto {
 export class JoinRoomDto {
   @IsString()
   @IsNotEmpty()
-  @Length(9, 9, { message: 'Room code must be in format ABCD-1234' })
+  @Length(9, 9, { message: ErrorCode.INVALID_ROOM_CODE })
   roomCode: string;
 
   @IsString()
