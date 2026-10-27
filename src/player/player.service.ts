@@ -1,12 +1,23 @@
 import { Injectable } from '@nestjs/common';
-import { Player } from 'src/shared/interfaces';
 import { randomUUID } from 'crypto';
+import { RedisService } from '../redis/redis.service';
+import { Player } from '../shared/interfaces';
+
+const PLAYER_TTL_SECONDS = 7200; // 2 horas
 
 @Injectable()
 export class PlayerService {
-  private players: Map<string, Player> = new Map();
+  constructor(private readonly redisService: RedisService) {}
 
-  public createPlayer(value: Omit<Player, 'id' | 'role' | 'isLeader'>): Player {
+  private getPlayerKey(playerId: string): string {
+    return `player:${playerId}`;
+  }
+
+  private getSocketKey(socketId: string): string {
+    return `socket_player:${socketId}`;
+  }
+
+  public async createPlayer(value: Omit<Player, 'id' | 'role' | 'isLeader'>): Promise<Player> {
     const player: Player = {
       id: randomUUID(),
       socketId: value.socketId,
@@ -15,25 +26,34 @@ export class PlayerService {
       roomCode: value.roomCode,
       connected: true,
     };
-    this.players.set(player.id, player);
+
+    await this.savePlayer(player);
     return player;
   }
 
-  public getPlayer(playerId: string): Player | undefined {
-    return this.players.get(playerId);
+  public async getPlayer(playerId: string): Promise<Player | null> {
+    return this.redisService.getJson<Player>(this.getPlayerKey(playerId));
   }
 
-  public getPlayerBySocketId(socketId: string): Player | undefined {
-    let player;
-    this.players.forEach((p) => {
-      if (p.socketId === socketId) {
-        player = p;
-      }
-    });
-    return player;
+  public async getPlayerBySocketId(socketId: string): Promise<Player | null> {
+    const playerId = await this.redisService.get(this.getSocketKey(socketId));
+    if (!playerId) return null;
+    return this.getPlayer(playerId);
   }
 
-  public removePlayer(playerId: string) {
-    this.players.delete(playerId);
+  public async savePlayer(player: Player): Promise<void> {
+    await Promise.all([
+      this.redisService.setJson(this.getPlayerKey(player.id), player, PLAYER_TTL_SECONDS),
+      this.redisService.set(this.getSocketKey(player.socketId), player.id, PLAYER_TTL_SECONDS),
+    ]);
+  }
+
+  public async removePlayer(playerId: string): Promise<void> {
+    const player = await this.getPlayer(playerId);
+    const keysToDelete: string[] = [this.getPlayerKey(playerId)];
+    if (player?.socketId) {
+      keysToDelete.push(this.getSocketKey(player.socketId));
+    }
+    await this.redisService.del(...keysToDelete);
   }
 }

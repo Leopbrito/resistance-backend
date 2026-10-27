@@ -8,8 +8,8 @@ import { GameState, Player, Room, Round } from '../shared/interfaces';
 export class GameService {
   constructor(private readonly roomService: RoomService) {}
 
-  public startGame(player: Player): Room {
-    const room = this.roomService.getRoom(player.roomCode!);
+  public async startGame(player: Player): Promise<Room> {
+    const room = await this.roomService.getRoom(player.roomCode!);
 
     if (room.hostId !== player.id) {
       throw new BadRequestException('Apenas o criador da sala pode iniciar o jogo');
@@ -34,6 +34,7 @@ export class GameService {
     this.assignRoles(players);
     this.startNewRound(room.gameState);
 
+    await this.roomService.saveRoom(room);
     return room;
   }
 
@@ -104,8 +105,8 @@ export class GameService {
     gameState.phase = GamePhase.TEAM_SELECTION;
   }
 
-  selectTeam(player: Player, selectedPlayers: string[]): Room {
-    const room = this.roomService.getRoom(player.roomCode!);
+  public async selectTeam(player: Player, selectedPlayers: string[]): Promise<Room> {
+    const room = await this.roomService.getRoom(player.roomCode!);
     const { gameState } = room;
 
     if (gameState.phase !== GamePhase.TEAM_SELECTION) {
@@ -125,12 +126,13 @@ export class GameService {
     });
 
     currentRound.selectedTeam = selectedPlayers;
+    await this.roomService.saveRoom(room);
 
     return room;
   }
 
-  submitSelectedMissionTeam(player: Player, selectedPlayers: string[]): Room {
-    const room = this.roomService.getRoom(player.roomCode!);
+  public async submitSelectedMissionTeam(player: Player, selectedPlayers: string[]): Promise<Room> {
+    const room = await this.roomService.getRoom(player.roomCode!);
     const { gameState } = room;
 
     if (gameState.phase !== GamePhase.TEAM_SELECTION) {
@@ -157,11 +159,12 @@ export class GameService {
     gameState.phase = GamePhase.VOTING;
     currentRound.currentTeamVoterId = currentRound.leaderId;
 
+    await this.roomService.saveRoom(room);
     return room;
   }
 
-  voteTeam(player: Player, vote: TeamVoteAction): Room {
-    const room = this.roomService.getRoom(player.roomCode!);
+  public async voteTeam(player: Player, vote: TeamVoteAction): Promise<Room> {
+    const room = await this.roomService.getRoom(player.roomCode!);
     const { gameState } = room;
 
     if (gameState.phase !== GamePhase.VOTING) {
@@ -190,6 +193,7 @@ export class GameService {
       currentRound.currentTeamVoterId = gameState.players[nextPlayerIndex].id;
     }
 
+    await this.roomService.saveRoom(room);
     return room;
   }
 
@@ -245,8 +249,12 @@ export class GameService {
     gameState.phase = GamePhase.TEAM_SELECTION;
   }
 
-  submitMissionVote(player: Player, vote: MissionVoteAction, resolveMissionResult: () => void): Room {
-    const room = this.roomService.getRoom(player.roomCode!);
+  public async submitMissionVote(
+    player: Player,
+    vote: MissionVoteAction,
+    resolveMissionResult: () => void,
+  ): Promise<Room> {
+    const room = await this.roomService.getRoom(player.roomCode!);
     const { gameState } = room;
 
     if (gameState.phase !== GamePhase.MISSION) {
@@ -272,6 +280,7 @@ export class GameService {
       resolveMissionResult();
     }
 
+    await this.roomService.saveRoom(room);
     return room;
   }
 
@@ -286,8 +295,6 @@ export class GameService {
 
     currentRound.failedVotesCount = failedVotes;
 
-    // A missão requer apenas 1 FAIL pra falhar nas regras clássicas padrão The Resistance
-    // (A não ser em 7+ jogadores e ronda 4, mas aqui não faremos essa exceção pra simplificar)
     if (failedVotes > 0) {
       currentRound.status = 'MISSION_FAILED';
       gameState.spyWins++;

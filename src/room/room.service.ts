@@ -1,13 +1,38 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { Room, Player } from '../shared/interfaces';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { RedisService } from '../redis/redis.service';
 import { GamePhase } from '../shared/enums';
+import { Player, Room } from '../shared/interfaces';
+
+const ROOM_TTL_SECONDS = 7200; // 2 horas
 
 @Injectable()
 export class RoomService {
-  private rooms: Record<string, Room> = {};
+  constructor(private readonly redisService: RedisService) {}
 
-  createRoom(hostPlayer: Player): Room {
-    const code = this.generateRoomCode();
+  private getRoomKey(code: string): string {
+    return `room:${code.toUpperCase()}`;
+  }
+
+  public async getRoom(code: string): Promise<Room> {
+    const room = await this.redisService.getJson<Room>(this.getRoomKey(code));
+    if (!room) {
+      throw new NotFoundException('Room not found');
+    }
+    // Renova TTL no acesso
+    await this.redisService.expire(this.getRoomKey(code), ROOM_TTL_SECONDS);
+    return room;
+  }
+
+  public async saveRoom(room: Room): Promise<void> {
+    await this.redisService.setJson(this.getRoomKey(room.code), room, ROOM_TTL_SECONDS);
+  }
+
+  public async deleteRoom(code: string): Promise<void> {
+    await this.redisService.del(this.getRoomKey(code));
+  }
+
+  public async createRoom(hostPlayer: Player): Promise<Room> {
+    const code = await this.generateRoomCode();
     hostPlayer.roomCode = code;
 
     const newRoom: Room = {
@@ -25,20 +50,12 @@ export class RoomService {
       },
     };
 
-    this.rooms[code] = newRoom;
+    await this.saveRoom(newRoom);
     return newRoom;
   }
 
-  public getRoom(code: string): Room {
-    const room = this.rooms[code];
-    if (!room) {
-      throw new NotFoundException('Room not found');
-    }
-    return room;
-  }
-
-  public joinRoom(player: Player): Room {
-    const room = this.getRoom(player.roomCode!);
+  public async joinRoom(player: Player): Promise<Room> {
+    const room = await this.getRoom(player.roomCode!);
 
     if (room.gameState.phase !== GamePhase.WAITING) {
       throw new BadRequestException('Game has already started');
@@ -57,27 +74,48 @@ export class RoomService {
     }
 
     room.gameState.players.push(player);
+    await this.saveRoom(room);
     return room;
   }
 
-  public removePlayer(id: string) {
-    for (const code in this.rooms) {
-      const room = this.rooms[code];
-      const playerIndex = room.gameState.players.findIndex((p) => p.id === id);
+  public async removePlayer(id: string, roomCode?: string): Promise<void> {
+    if (roomCode) {
+      try {
+        const room = await this.getRoom(roomCode);
+        await this.removePlayerFromRoom(room, id);
+      } catch {
+        // Sala já inexistente
+      }
+      return;
+    }
 
-      if (playerIndex !== -1) {
-        room.gameState.players.splice(playerIndex, 1);
-
-        if (room.gameState.players.length === 0) {
-          delete this.rooms[code];
-        } else if (room.hostId === id) {
-          room.hostId = room.gameState.players[0].socketId;
-        }
+    // Caso roomCode não seja fornecido, busca em todas as chaves de salas
+    const roomKeys = await this.redisService.keys('room:*');
+    for (const key of roomKeys) {
+      const room = await this.redisService.getJson<Room>(key);
+      if (room) {
+        await this.removePlayerFromRoom(room, id);
       }
     }
   }
 
-  private generateRoomCode(): string {
+  private async removePlayerFromRoom(room: Room, playerId: string): Promise<void> {
+    const playerIndex = room.gameState.players.findIndex((p) => p.id === playerId);
+    if (playerIndex === -1) return;
+
+    room.gameState.players.splice(playerIndex, 1);
+
+    if (room.gameState.players.length === 0) {
+      await this.deleteRoom(room.code);
+    } else {
+      if (room.hostId === playerId) {
+        room.hostId = room.gameState.players[0].id;
+      }
+      await this.saveRoom(room);
+    }
+  }
+
+  private async generateRoomCode(): Promise<string> {
     const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
     const numbers = '0123456789';
     let code = '';
@@ -85,7 +123,8 @@ export class RoomService {
     code += '-';
     for (let i = 0; i < 4; i++) code += numbers.charAt(Math.floor(Math.random() * numbers.length));
 
-    if (this.rooms[code]) return this.generateRoomCode();
+    const exists = await this.redisService.exists(this.getRoomKey(code));
+    if (exists) return this.generateRoomCode();
     return code;
   }
 }

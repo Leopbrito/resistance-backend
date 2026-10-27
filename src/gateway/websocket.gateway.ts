@@ -33,36 +33,72 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     private readonly playerService: PlayerService,
   ) {}
 
-  handleConnection(client: Socket) {
+  async handleConnection(client: Socket) {
     const playerId = client.handshake.query.playerId as string;
     this.logger.log(`Client connected: ${playerId}  ${client.id}`);
 
     if (playerId) {
-      const player = this.playerService.getPlayer(playerId);
+      const player = await this.playerService.getPlayer(playerId);
       if (player) {
         player.socketId = client.id;
         player.connected = true;
-        const room = this.roomService.getRoom(player.roomCode!);
-        this.emitGameStateAsync(room, true);
+        await this.playerService.savePlayer(player);
+
+        if (player.roomCode) {
+          try {
+            client.join(player.roomCode);
+            const room = await this.roomService.getRoom(player.roomCode);
+            const roomPlayer = room.gameState.players.find((p) => p.id === player.id);
+            if (roomPlayer) {
+              roomPlayer.socketId = client.id;
+              roomPlayer.connected = true;
+              await this.roomService.saveRoom(room);
+            }
+            this.emitGameStateAsync(room, true);
+          } catch (e) {
+            this.logger.warn(`Could not restore room ${player.roomCode}: ${e.message}`);
+          }
+        }
       }
     }
   }
 
-  handleDisconnect(client: Socket) {
+  async handleDisconnect(client: Socket) {
     this.logger.log(`Client disconnected: ${client.id}`);
 
-    const player = this.playerService.getPlayerBySocketId(client.id);
+    const player = await this.playerService.getPlayerBySocketId(client.id);
     if (!player) return;
 
-    const room = this.roomService.getRoom(player.roomCode!);
     player.connected = false;
-    this.emitGameStateAsync(room);
+    await this.playerService.savePlayer(player);
 
-    setTimeout(() => {
-      if (!player.connected) {
-        this.roomService.removePlayer(player.id);
-        this.playerService.removePlayer(player.id);
+    if (player.roomCode) {
+      try {
+        const room = await this.roomService.getRoom(player.roomCode);
+        const roomPlayer = room.gameState.players.find((p) => p.id === player.id);
+        if (roomPlayer) {
+          roomPlayer.connected = false;
+          await this.roomService.saveRoom(room);
+        }
         this.emitGameStateAsync(room);
+      } catch (e) {
+        this.logger.warn(`Room ${player.roomCode} not found during disconnect: ${e.message}`);
+      }
+    }
+
+    setTimeout(async () => {
+      const currentPlayer = await this.playerService.getPlayer(player.id);
+      if (currentPlayer && !currentPlayer.connected) {
+        if (currentPlayer.roomCode) {
+          await this.roomService.removePlayer(currentPlayer.id, currentPlayer.roomCode);
+          try {
+            const updatedRoom = await this.roomService.getRoom(currentPlayer.roomCode);
+            this.emitGameStateAsync(updatedRoom);
+          } catch {
+            // Sala já encerrada
+          }
+        }
+        await this.playerService.removePlayer(currentPlayer.id);
       }
     }, DISCONNECT_IN_ONE_MINUTES);
   }
@@ -71,13 +107,16 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   @UsePipes(new ValidationPipe())
   @SubscribeMessage(SocketEvent.CREATE_ROOM)
-  handleCreateRoom(@MessageBody() dto: CreateRoomDto, @ConnectedSocket() client: Socket) {
-    const player = this.playerService.createPlayer({
+  async handleCreateRoom(@MessageBody() dto: CreateRoomDto, @ConnectedSocket() client: Socket) {
+    const player = await this.playerService.createPlayer({
       name: dto.playerName,
       isHost: true,
       socketId: client.id,
     });
-    const room = this.roomService.createRoom(player);
+    const room = await this.roomService.createRoom(player);
+    player.roomCode = room.code;
+    await this.playerService.savePlayer(player);
+
     client.join(room.code);
 
     this.logger.log(`Room created: ${room.code} by ${client.id}`);
@@ -87,15 +126,15 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   @UsePipes(new ValidationPipe())
   @SubscribeMessage(SocketEvent.JOIN_ROOM)
-  handleJoinRoom(@MessageBody() dto: JoinRoomDto, @ConnectedSocket() client: Socket) {
+  async handleJoinRoom(@MessageBody() dto: JoinRoomDto, @ConnectedSocket() client: Socket) {
     try {
-      const player = this.playerService.createPlayer({
+      const player = await this.playerService.createPlayer({
         name: dto.playerName,
         isHost: false,
         socketId: client.id,
         roomCode: dto.roomCode.toUpperCase(),
       });
-      const room = this.roomService.joinRoom(player);
+      const room = await this.roomService.joinRoom(player);
       client.join(room.code);
 
       this.logger.log(`Player ${client.id} joined room ${room.code}`);
@@ -110,12 +149,12 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   // --- GAME EVENTS ---
 
   @SubscribeMessage(SocketEvent.START_GAME)
-  handleStartGame(@ConnectedSocket() client: Socket) {
-    const player = this.playerService.getPlayerBySocketId(client.id);
+  async handleStartGame(@ConnectedSocket() client: Socket) {
+    const player = await this.playerService.getPlayerBySocketId(client.id);
     if (!player) return;
 
     try {
-      const room = this.gameService.startGame(player);
+      const room = await this.gameService.startGame(player);
       this.logger.log(`Game started in room ${room.code}`);
       this.emitGameStateAsync(room);
       this.emitRevealRoles(room);
@@ -127,12 +166,12 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   @UsePipes(new ValidationPipe())
   @SubscribeMessage(SocketEvent.SELECT_MISSION_TEAM)
-  handleSelectTeam(@MessageBody() dto: SelectTeamDto, @ConnectedSocket() client: Socket) {
-    const player = this.playerService.getPlayerBySocketId(client.id);
+  async handleSelectTeam(@MessageBody() dto: SelectTeamDto, @ConnectedSocket() client: Socket) {
+    const player = await this.playerService.getPlayerBySocketId(client.id);
     if (!player) return;
 
     try {
-      const room = this.gameService.selectTeam(player, dto.selectedPlayers);
+      const room = await this.gameService.selectTeam(player, dto.selectedPlayers);
       this.emitGameStateAsync(room);
     } catch (e) {
       client.emit('error', e.message);
@@ -141,12 +180,12 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   @UsePipes(new ValidationPipe())
   @SubscribeMessage(SocketEvent.SUBMIT_SELECTED_MISSION_TEAM)
-  handleSubmitSelectedMissionTeam(@MessageBody() dto: SelectTeamDto, @ConnectedSocket() client: Socket) {
-    const player = this.playerService.getPlayerBySocketId(client.id);
+  async handleSubmitSelectedMissionTeam(@MessageBody() dto: SelectTeamDto, @ConnectedSocket() client: Socket) {
+    const player = await this.playerService.getPlayerBySocketId(client.id);
     if (!player) return;
 
     try {
-      const room = this.gameService.submitSelectedMissionTeam(player, dto.selectedPlayers);
+      const room = await this.gameService.submitSelectedMissionTeam(player, dto.selectedPlayers);
       this.emitGameStateAsync(room);
     } catch (e) {
       client.emit('error', e.message);
@@ -155,12 +194,12 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   @UsePipes(new ValidationPipe())
   @SubscribeMessage(SocketEvent.VOTE_TEAM_APPROVAL)
-  handleVoteTeam(@MessageBody() dto: VoteTeamDto, @ConnectedSocket() client: Socket) {
-    const player = this.playerService.getPlayerBySocketId(client.id);
+  async handleVoteTeam(@MessageBody() dto: VoteTeamDto, @ConnectedSocket() client: Socket) {
+    const player = await this.playerService.getPlayerBySocketId(client.id);
     if (!player) return;
 
     try {
-      const room = this.gameService.voteTeam(player, dto.vote);
+      const room = await this.gameService.voteTeam(player, dto.vote);
       this.emitGameStateAsync(room);
     } catch (e) {
       client.emit('error', e.message);
@@ -169,13 +208,13 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   @UsePipes(new ValidationPipe())
   @SubscribeMessage(SocketEvent.SUBMIT_MISSION_VOTE)
-  handleSubmitMissionVote(@MessageBody() dto: MissionVoteDto, @ConnectedSocket() client: Socket) {
-    const player = this.playerService.getPlayerBySocketId(client.id);
+  async handleSubmitMissionVote(@MessageBody() dto: MissionVoteDto, @ConnectedSocket() client: Socket) {
+    const player = await this.playerService.getPlayerBySocketId(client.id);
     if (!player) return;
 
     try {
       let resolveResultMission = false;
-      const room = this.gameService.submitMissionVote(player, dto.vote, () => {
+      const room = await this.gameService.submitMissionVote(player, dto.vote, () => {
         resolveResultMission = true;
       });
       this.emitGameStateAsync(room);
@@ -189,12 +228,12 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   @UsePipes(new ValidationPipe())
   @SubscribeMessage(SocketEvent.SUBMIT_MISSION_RESULT_REVEAL)
-  handleSubmitMissionResultReveal(@ConnectedSocket() client: Socket) {
-    const player = this.playerService.getPlayerBySocketId(client.id);
+  async handleSubmitMissionResultReveal(@ConnectedSocket() client: Socket) {
+    const player = await this.playerService.getPlayerBySocketId(client.id);
     if (!player) return;
 
     try {
-      const room = this.roomService.getRoom(player.roomCode!);
+      const room = await this.roomService.getRoom(player.roomCode!);
       this.emitRevealMissionResult(room);
     } catch (e) {
       client.emit('error', e.message);
