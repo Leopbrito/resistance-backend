@@ -182,15 +182,79 @@ export class GameService {
     }
 
     currentRound.teamVotes[player.id] = vote;
+    this.advanceTeamVoting(gameState, player.id);
 
-    const totalVotes = Object.keys(currentRound.teamVotes).length;
-    if (totalVotes === gameState.players.length) {
+    await this.roomService.saveRoom(room);
+    return room;
+  }
+
+  // Passa a vez para o próximo votante ou resolve a votação quando todos votaram ou foram pulados
+  private advanceTeamVoting(gameState: GameState, fromPlayerId: string) {
+    const currentRound = gameState.rounds[gameState.currentRoundIndex];
+    const countedVotes = Object.keys(currentRound.teamVotes).length + (currentRound.skippedTeamVoters?.length ?? 0);
+
+    if (countedVotes >= gameState.players.length) {
       currentRound.currentTeamVoterId = undefined;
       this.resolveTeamVotes(gameState);
     } else {
-      const currentPlayerIndex = gameState.players.findIndex((p) => p.id === player.id);
+      const currentPlayerIndex = gameState.players.findIndex((p) => p.id === fromPlayerId);
       const nextPlayerIndex = (currentPlayerIndex + 1) % gameState.players.length;
       currentRound.currentTeamVoterId = gameState.players[nextPlayerIndex].id;
+    }
+  }
+
+  /** Jogador offline de quem o jogo está esperando uma ação (líder, votante ou membro da missão). */
+  public getPendingOfflineActorId(gameState: GameState): string | undefined {
+    const round = gameState.rounds[gameState.currentRoundIndex];
+    if (!round) return undefined;
+
+    const isOffline = (id?: string) => !!id && gameState.players.find((p) => p.id === id)?.connected === false;
+
+    switch (gameState.phase) {
+      case GamePhase.TEAM_SELECTION:
+        return isOffline(round.leaderId) ? round.leaderId : undefined;
+      case GamePhase.VOTING:
+        return isOffline(round.currentTeamVoterId) ? round.currentTeamVoterId : undefined;
+      case GamePhase.MISSION:
+        return round.selectedTeam.find((id) => !round.missionVotes[id] && isOffline(id));
+      default:
+        return undefined;
+    }
+  }
+
+  /**
+   * Destrava o jogo quando o ator da vez continua offline: pula o líder, pula o voto de equipe
+   * ou registra SUCCESS na missão. Retorna null se o ator já mudou ou voltou.
+   */
+  public async skipOfflineActor(
+    roomCode: string,
+    expectedActorId: string,
+    resolveMissionResult: () => void,
+  ): Promise<Room | null> {
+    const room = await this.roomService.getRoom(roomCode);
+    const { gameState } = room;
+
+    if (this.getPendingOfflineActorId(gameState) !== expectedActorId) return null;
+
+    const currentRound = gameState.rounds[gameState.currentRoundIndex];
+
+    switch (gameState.phase) {
+      case GamePhase.TEAM_SELECTION:
+        // Rotaciona o líder sem contar como time rejeitado
+        this.resetCurrentRoundForNewTeam(gameState);
+        break;
+      case GamePhase.VOTING:
+        currentRound.skippedTeamVoters = [...(currentRound.skippedTeamVoters ?? []), expectedActorId];
+        this.advanceTeamVoting(gameState, expectedActorId);
+        break;
+      case GamePhase.MISSION: {
+        const actor = gameState.players.find((p) => p.id === expectedActorId)!;
+        return this.submitMissionVote(
+          { ...actor, roomCode: room.code },
+          MissionVoteAction.SUCCESS,
+          resolveMissionResult,
+        );
+      }
     }
 
     await this.roomService.saveRoom(room);
@@ -243,6 +307,7 @@ export class GameService {
     currentRound.leaderId = gameState.players[nextLeaderIndex].id;
     currentRound.selectedTeam = [];
     currentRound.teamVotes = {};
+    currentRound.skippedTeamVoters = [];
     currentRound.status = 'PENDING';
     currentRound.currentTeamVoterId = undefined;
 

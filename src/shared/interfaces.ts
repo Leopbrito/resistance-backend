@@ -22,6 +22,7 @@ export interface Round {
   status: 'PENDING' | 'TEAM_APPROVED' | 'TEAM_REJECTED' | 'MISSION_SUCCESS' | 'MISSION_FAILED';
   failedVotesCount?: number;
   currentTeamVoterId?: string;
+  skippedTeamVoters?: string[]; // votantes offline pulados (não entram na contagem)
 }
 
 export interface GameState {

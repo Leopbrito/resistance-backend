@@ -14,9 +14,11 @@ import { GameService } from '../game/game.service';
 import { PlayerService } from '../player/player.service';
 import { RoomService } from '../room/room.service';
 import { CreateRoomDto, JoinRoomDto, MissionVoteDto, SelectTeamDto, VoteTeamDto } from '../shared/dtos';
-import { GameState, Room } from '../shared/interfaces';
+import { GameState, Player, Room } from '../shared/interfaces';
 
 const DISCONNECT_IN_ONE_MINUTES = 60000;
+const OFFLINE_ACTOR_SKIP_MS = 60000;
+const IN_PROGRESS_PHASES = [GamePhase.TEAM_SELECTION, GamePhase.VOTING, GamePhase.MISSION];
 
 @WebSocketGateway({
   cors: { origin: '*' },
@@ -26,6 +28,9 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   @WebSocketServer() public server: Server;
 
   private logger: Logger = new Logger('WebsocketGateway');
+
+  // Um timer por sala: espera o ator offline da vez antes de pular a ação dele
+  private offlineActorTimers = new Map<string, { actorId: string; key: string; timer: NodeJS.Timeout }>();
 
   constructor(
     private readonly roomService: RoomService,
@@ -98,18 +103,36 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     setTimeout(async () => {
       const currentPlayer = await this.playerService.getPlayer(player.id);
       if (currentPlayer && !currentPlayer.connected && currentPlayer.socketId === client.id) {
-        if (currentPlayer.roomCode) {
-          await this.roomService.removePlayer(currentPlayer.id, currentPlayer.roomCode);
-          try {
-            const updatedRoom = await this.roomService.getRoom(currentPlayer.roomCode);
-            this.emitGameStateAsync(updatedRoom);
-          } catch {
-            // Sala já encerrada
-          }
-        }
-        await this.playerService.removePlayer(currentPlayer.id);
+        await this.handleOfflineTimeout(currentPlayer);
       }
     }, DISCONNECT_IN_ONE_MINUTES);
+  }
+
+  private async handleOfflineTimeout(player: Player) {
+    if (player.roomCode) {
+      try {
+        const room = await this.roomService.getRoom(player.roomCode);
+
+        // Durante a partida o jogador é mantido para poder voltar; só o host é repassado
+        if (IN_PROGRESS_PHASES.includes(room.gameState.phase)) {
+          if (await this.roomService.migrateHostIfOffline(room)) {
+            this.emitGameStateAsync(room);
+          }
+          return;
+        }
+      } catch {
+        // Sala já encerrada
+      }
+
+      await this.roomService.removePlayer(player.id, player.roomCode);
+      try {
+        const updatedRoom = await this.roomService.getRoom(player.roomCode);
+        this.emitGameStateAsync(updatedRoom);
+      } catch {
+        // Sala já encerrada
+      }
+    }
+    await this.playerService.removePlayer(player.id);
   }
 
   // --- ROOM EVENTS ---
@@ -283,6 +306,49 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
           privateGameState,
         );
     });
+
+    this.scheduleOfflineActorSkip(room);
+  }
+
+  private scheduleOfflineActorSkip(room: Room) {
+    const { gameState } = room;
+    const actorId = this.gameService.getPendingOfflineActorId(gameState);
+    const key = actorId
+      ? `${gameState.phase}:${gameState.currentRoundIndex}:${gameState.failedTeamsInRow}:${actorId}`
+      : undefined;
+
+    const existing = this.offlineActorTimers.get(room.code);
+    if (existing && existing.key === key) return;
+    if (existing) {
+      clearTimeout(existing.timer);
+      this.offlineActorTimers.delete(room.code);
+    }
+    if (!actorId || !key) return;
+
+    const timer = setTimeout(() => this.skipOfflineActor(room.code, actorId), OFFLINE_ACTOR_SKIP_MS);
+    timer.unref?.();
+    this.offlineActorTimers.set(room.code, { actorId, key, timer });
+  }
+
+  private async skipOfflineActor(roomCode: string, actorId: string) {
+    this.offlineActorTimers.delete(roomCode);
+
+    try {
+      let missionResolved = false;
+      const room = await this.gameService.skipOfflineActor(roomCode, actorId, () => {
+        missionResolved = true;
+      });
+      if (!room) return;
+
+      this.logger.log(`Skipped offline player ${actorId} in room ${roomCode}`);
+      await this.roomService.migrateHostIfOffline(room);
+      this.emitGameStateAsync(room);
+      if (missionResolved) {
+        this.emitOpenMissionResultScreen(room);
+      }
+    } catch (e) {
+      this.logger.warn(`Could not skip offline player ${actorId} in room ${roomCode}: ${e.message}`);
+    }
   }
 
   private hideSpysforResistancePlayer(gameState: GameState) {

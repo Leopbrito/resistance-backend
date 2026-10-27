@@ -149,4 +149,36 @@ describe('RoomService', () => {
 
     await expect(service.joinRoom(newPlayer)).rejects.toThrow(BadRequestException);
   });
+  describe('migrateHostIfOffline', () => {
+    const makeRoom = (hostConnected: boolean, guestConnected: boolean): Room => ({
+      code: 'ABCD-1234',
+      hostId: 'host-1',
+      gameState: {
+        phase: GamePhase.TEAM_SELECTION,
+        me: null,
+        players: [
+          { ...createMockHost(), connected: hostConnected },
+          { ...createMockHost(), id: 'guest-1', isHost: false, connected: guestConnected },
+        ],
+        resistanceWins: 0,
+        spyWins: 0,
+        rounds: [],
+        currentRoundIndex: 0,
+        failedTeamsInRow: 0,
+      },
+    });
+
+    it('passes the host role to a connected player when the host is offline', async () => {
+      const room = makeRoom(false, true);
+
+      expect(await service.migrateHostIfOffline(room)).toBe(true);
+      expect(room.hostId).toBe('guest-1');
+      expect(room.gameState.players.map((p) => p.isHost)).toEqual([false, true]);
+    });
+
+    it('keeps the host when still connected or when nobody else is online', async () => {
+      expect(await service.migrateHostIfOffline(makeRoom(true, true))).toBe(false);
+      expect(await service.migrateHostIfOffline(makeRoom(false, false))).toBe(false);
+    });
+  });
 });

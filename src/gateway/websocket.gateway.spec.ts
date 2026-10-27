@@ -65,9 +65,14 @@ describe('WebsocketGateway reconnection', () => {
       getRoom: jest.fn(async () => room),
       saveRoom: jest.fn(),
       removePlayer: jest.fn(),
+      migrateHostIfOffline: jest.fn(),
     } as any;
 
-    gateway = new WebsocketGateway(roomService, {} as GameService, playerService);
+    gateway = new WebsocketGateway(
+      roomService,
+      { getPendingOfflineActorId: jest.fn() } as unknown as GameService,
+      playerService,
+    );
     emit = jest.fn();
     to = jest.fn(() => ({ emit }));
     gateway.server = { to } as any;
@@ -112,5 +117,24 @@ describe('WebsocketGateway reconnection', () => {
 
     expect(roomService.removePlayer).not.toHaveBeenCalled();
     expect(playerService.removePlayer).not.toHaveBeenCalled();
+  });
+
+  it('keeps an offline player in a game in progress after the grace period', async () => {
+    await gateway.handleDisconnect(makeClient('sock-p2'));
+
+    await jest.advanceTimersByTimeAsync(60000);
+
+    expect(roomService.removePlayer).not.toHaveBeenCalled();
+    expect(playerService.removePlayer).not.toHaveBeenCalled();
+  });
+
+  it('removes an offline player from the lobby after the grace period', async () => {
+    room.gameState.phase = GamePhase.WAITING;
+    await gateway.handleDisconnect(makeClient('sock-p2'));
+
+    await jest.advanceTimersByTimeAsync(60000);
+
+    expect(roomService.removePlayer).toHaveBeenCalledWith('p2', 'ABCD-1234');
+    expect(playerService.removePlayer).toHaveBeenCalledWith('p2');
   });
 });

@@ -99,6 +99,22 @@ export class RoomService {
     }
   }
 
+  /** Passa o host para outro jogador conectado quando o host atual está offline. */
+  public async migrateHostIfOffline(room: Room): Promise<boolean> {
+    const { players } = room.gameState;
+    const host = players.find((p) => p.id === room.hostId);
+    if (!host || host.connected !== false) return false;
+
+    const nextHost = players.find((p) => p.id !== host.id && p.connected !== false);
+    if (!nextHost) return false;
+
+    host.isHost = false;
+    nextHost.isHost = true;
+    room.hostId = nextHost.id;
+    await this.saveRoom(room);
+    return true;
+  }
+
   private async removePlayerFromRoom(room: Room, playerId: string): Promise<void> {
     const playerIndex = room.gameState.players.findIndex((p) => p.id === playerId);
     if (playerIndex === -1) return;
