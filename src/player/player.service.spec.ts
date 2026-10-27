@@ -14,6 +14,7 @@ describe('PlayerService', () => {
       getJson: jest.fn(),
       setJson: jest.fn(),
       del: jest.fn(),
+      expire: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -103,5 +104,22 @@ describe('PlayerService', () => {
 
     await service.removePlayer('p-1');
     expect(redisService.del).toHaveBeenCalledWith('player:p-1', 'socket_player:sock-456');
+  });
+
+  it('should renew the TTL of player and socket keys on access', async () => {
+    const stored = { id: 'p1', socketId: 'sock-1', name: 'A', isHost: false } as Player;
+    redisService.getJson.mockResolvedValue(stored);
+
+    await service.getPlayer('p1');
+
+    expect(redisService.expire).toHaveBeenCalledWith('player:p1', 7200);
+    expect(redisService.expire).toHaveBeenCalledWith('socket_player:sock-1', 7200);
+  });
+
+  it('should not renew anything for an unknown player', async () => {
+    redisService.getJson.mockResolvedValue(null);
+
+    expect(await service.getPlayer('ghost')).toBeNull();
+    expect(redisService.expire).not.toHaveBeenCalled();
   });
 });

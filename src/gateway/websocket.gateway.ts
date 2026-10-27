@@ -45,8 +45,12 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     if (playerId) {
       const player = await this.playerService.getPlayer(playerId);
       if (player) {
-        if (player.socketId && player.socketId !== client.id) {
-          await this.playerService.releaseSocket(player.socketId);
+        const previousSocketId = player.socketId;
+        if (previousSocketId && previousSocketId !== client.id) {
+          await this.playerService.releaseSocket(previousSocketId);
+          // Outra aba/dispositivo ainda conectado perde a sessão (no-op se o socket já caiu, como num refresh)
+          this.server.in(previousSocketId).emit(SocketEvent.SESSION_REPLACED);
+          this.server.in(previousSocketId).disconnectSockets(true);
         }
         player.socketId = client.id;
         player.connected = true;
@@ -65,8 +69,12 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
             this.emitGameStateAsync(room, player.id);
           } catch (e) {
             this.logger.warn(`Could not restore room ${player.roomCode}: ${e.message}`);
+            client.emit(SocketEvent.SESSION_INVALID);
+            await this.playerService.removePlayer(player.id);
           }
         }
+      } else {
+        client.emit(SocketEvent.SESSION_INVALID);
       }
     }
   }
@@ -135,6 +143,15 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     await this.playerService.removePlayer(player.id);
   }
 
+  // Sessão desconhecida (TTL expirado, Redis limpo): avisa o cliente em vez de ignorar em silêncio
+  private async requirePlayer(client: Socket): Promise<Player | null> {
+    const player = await this.playerService.getPlayerBySocketId(client.id);
+    if (!player) {
+      client.emit(SocketEvent.SESSION_INVALID);
+    }
+    return player;
+  }
+
   // --- ROOM EVENTS ---
 
   @UsePipes(new ValidationPipe())
@@ -182,7 +199,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   @SubscribeMessage(SocketEvent.START_GAME)
   async handleStartGame(@ConnectedSocket() client: Socket) {
-    const player = await this.playerService.getPlayerBySocketId(client.id);
+    const player = await this.requirePlayer(client);
     if (!player) return;
 
     try {
@@ -199,7 +216,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   @UsePipes(new ValidationPipe())
   @SubscribeMessage(SocketEvent.SELECT_MISSION_TEAM)
   async handleSelectTeam(@MessageBody() dto: SelectTeamDto, @ConnectedSocket() client: Socket) {
-    const player = await this.playerService.getPlayerBySocketId(client.id);
+    const player = await this.requirePlayer(client);
     if (!player) return;
 
     try {
@@ -213,7 +230,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   @UsePipes(new ValidationPipe())
   @SubscribeMessage(SocketEvent.SUBMIT_SELECTED_MISSION_TEAM)
   async handleSubmitSelectedMissionTeam(@MessageBody() dto: SelectTeamDto, @ConnectedSocket() client: Socket) {
-    const player = await this.playerService.getPlayerBySocketId(client.id);
+    const player = await this.requirePlayer(client);
     if (!player) return;
 
     try {
@@ -227,7 +244,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   @UsePipes(new ValidationPipe())
   @SubscribeMessage(SocketEvent.VOTE_TEAM_APPROVAL)
   async handleVoteTeam(@MessageBody() dto: VoteTeamDto, @ConnectedSocket() client: Socket) {
-    const player = await this.playerService.getPlayerBySocketId(client.id);
+    const player = await this.requirePlayer(client);
     if (!player) return;
 
     try {
@@ -241,7 +258,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   @UsePipes(new ValidationPipe())
   @SubscribeMessage(SocketEvent.SUBMIT_MISSION_VOTE)
   async handleSubmitMissionVote(@MessageBody() dto: MissionVoteDto, @ConnectedSocket() client: Socket) {
-    const player = await this.playerService.getPlayerBySocketId(client.id);
+    const player = await this.requirePlayer(client);
     if (!player) return;
 
     try {
@@ -261,7 +278,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   @UsePipes(new ValidationPipe())
   @SubscribeMessage(SocketEvent.SUBMIT_MISSION_RESULT_REVEAL)
   async handleSubmitMissionResultReveal(@ConnectedSocket() client: Socket) {
-    const player = await this.playerService.getPlayerBySocketId(client.id);
+    const player = await this.requirePlayer(client);
     if (!player) return;
 
     try {

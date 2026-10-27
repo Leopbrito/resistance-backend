@@ -31,8 +31,16 @@ export class PlayerService {
     return player;
   }
 
+  // Renova o TTL no acesso, como na sala, para partidas longas não expirarem o jogador
   public async getPlayer(playerId: string): Promise<Player | null> {
-    return this.redisService.getJson<Player>(this.getPlayerKey(playerId));
+    const player = await this.redisService.getJson<Player>(this.getPlayerKey(playerId));
+    if (player) {
+      await Promise.all([
+        this.redisService.expire(this.getPlayerKey(playerId), PLAYER_TTL_SECONDS),
+        this.redisService.expire(this.getSocketKey(player.socketId), PLAYER_TTL_SECONDS),
+      ]);
+    }
+    return player;
   }
 
   public async getPlayerBySocketId(socketId: string): Promise<Player | null> {

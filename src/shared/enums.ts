@@ -29,6 +29,8 @@ export enum SocketEvent {
   REVEAL_ROLES = 'revealRoles',
   OPEN_MISSION_RESULT_SCREEN = 'openMissionResultScreen',
   REVEAL_MISSION_RESULT = 'revealMissionResult',
+  SESSION_INVALID = 'sessionInvalid',
+  SESSION_REPLACED = 'sessionReplaced',
 
   // Client to Server
   CREATE_ROOM = 'createRoom',

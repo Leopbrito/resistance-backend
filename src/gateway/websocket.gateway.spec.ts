@@ -11,6 +11,9 @@ describe('WebsocketGateway reconnection', () => {
   let roomService: jest.Mocked<RoomService>;
   let emit: jest.Mock;
   let to: jest.Mock;
+  let serverIn: jest.Mock;
+  let inEmit: jest.Mock;
+  let disconnectSockets: jest.Mock;
 
   const makePlayer = (id: string): Player => ({
     id,
@@ -75,7 +78,10 @@ describe('WebsocketGateway reconnection', () => {
     );
     emit = jest.fn();
     to = jest.fn(() => ({ emit }));
-    gateway.server = { to } as any;
+    disconnectSockets = jest.fn();
+    inEmit = jest.fn();
+    serverIn = jest.fn(() => ({ emit: inEmit, disconnectSockets }));
+    gateway.server = { to, in: serverIn } as any;
   });
 
   afterEach(() => jest.useRealTimers());
@@ -136,5 +142,40 @@ describe('WebsocketGateway reconnection', () => {
 
     expect(roomService.removePlayer).toHaveBeenCalledWith('p2', 'ABCD-1234');
     expect(playerService.removePlayer).toHaveBeenCalledWith('p2');
+  });
+
+  it('replaces the previous socket of the same player', async () => {
+    await gateway.handleConnection(makeClient('sock-new', 'p2'));
+
+    expect(serverIn).toHaveBeenCalledWith('sock-p2');
+    expect(inEmit).toHaveBeenCalledWith(SocketEvent.SESSION_REPLACED);
+    expect(disconnectSockets).toHaveBeenCalledWith(true);
+  });
+
+  it('tells the client the session is invalid when the player is unknown', async () => {
+    const client = makeClient('sock-new', 'ghost');
+
+    await gateway.handleConnection(client);
+
+    expect(client.emit).toHaveBeenCalledWith(SocketEvent.SESSION_INVALID);
+  });
+
+  it('tells the client the session is invalid when the room expired', async () => {
+    roomService.getRoom.mockRejectedValue(new Error('Room not found'));
+    const client = makeClient('sock-new', 'p2');
+
+    await gateway.handleConnection(client);
+
+    expect(client.emit).toHaveBeenCalledWith(SocketEvent.SESSION_INVALID);
+    expect(playerService.removePlayer).toHaveBeenCalledWith('p2');
+  });
+
+  it('tells the client the session is invalid when a game event comes from an unknown socket', async () => {
+    playerService.getPlayerBySocketId.mockResolvedValue(null);
+    const client = makeClient('sock-ghost');
+
+    await gateway.handleStartGame(client);
+
+    expect(client.emit).toHaveBeenCalledWith(SocketEvent.SESSION_INVALID);
   });
 });
